@@ -23,6 +23,8 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout.dimension import Dimension
+from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.styles import Style
 
 from langchain_core.messages import (
@@ -46,7 +48,6 @@ from chcode.display import (
     render_status,
     render_ai_end,
     render_tool_call,
-    get_token_text,
     get_context_usage_text,
 )
 from chcode.prompts import select, confirm, select_or_custom, text, checkbox
@@ -159,16 +160,18 @@ def _get_group_display(group: list) -> str:
     return "(空消息组)"
 
 
-def _collect_ids_from_group(group_index: int, groups: list, mode: str = "edit") -> tuple[list[str], list[str]]:
+def _collect_ids_from_group(
+    group_index: int, groups: list, mode: str = "edit"
+) -> tuple[list[str], list[str]]:
     """
     收集要删除的消息 ID
     参考 chagent fork_message 逻辑：从目标 HumanMessage 开始，删除之后的所有消息
-    
+
     Args:
         group_index: 目标组索引
         groups: 所有消息组
         mode: "edit" 删除目标组及之后, "fork" 只删除目标组之后（保留目标组）
-    
+
     Returns:
         (no_need_ids, all_ids): 要删除的消息 ID 列表，所有消息 ID 列表
     """
@@ -207,6 +210,8 @@ class ChatREPL:
         self._prompt_session = None
         # 编辑缓冲区（用于 /edit 命令）
         self._edit_buffer: str | None = None
+        # 中断恢复缓冲区（中断时将内容填回输入框，不进入编辑模式）
+        self._interrupt_buffer: str | None = None
         # 上下文用量缓存
         self._context_text: str = ""
 
@@ -235,7 +240,9 @@ class ChatREPL:
             self.workplace_path = wp
         else:
             # 选择工作目录
-            result = await text("输入工作目录路径 (留空使用当前目录):", default=str(Path.cwd()))
+            result = await text(
+                "输入工作目录路径 (留空使用当前目录):", default=str(Path.cwd())
+            )
             if result:
                 self.workplace_path = Path(result)
             else:
@@ -276,7 +283,10 @@ class ChatREPL:
         console.print("[dim]构建 Agent...[/dim]")
         self.agent = await asyncio.to_thread(
             build_agent,
-            self.model_config, self.checkpointer, None, self.yolo,
+            self.model_config,
+            self.checkpointer,
+            None,
+            self.yolo,
         )
 
         # 初始化 Git（subprocess.run 会阻塞事件循环）
@@ -291,6 +301,7 @@ class ChatREPL:
         """初始化 readline 历史（跨会话保存）"""
         try:
             import readline
+
             history_path = Path.home() / ".chat" / "history"
             history_path.parent.mkdir(exist_ok=True)
             if history_path.exists():
@@ -303,6 +314,7 @@ class ChatREPL:
         """保存 readline 历史"""
         try:
             import readline
+
             history_path = Path.home() / ".chat" / "history"
             history_path.parent.mkdir(exist_ok=True)
             readline.write_history_file(str(history_path))
@@ -360,8 +372,9 @@ class ChatREPL:
         import re
         import shutil
 
-        # 检查是否有编辑缓冲区
+        # 检查是否有编辑缓冲区或中断恢复缓冲区
         edit_mode = self._edit_buffer is not None
+        interrupt_mode = self._interrupt_buffer is not None
 
         # 初始化 prompt session（带命令自动补全 + 底部状态栏）
         if self._prompt_session is None:
@@ -384,8 +397,8 @@ class ChatREPL:
                 parts = []
                 model = self.model_config.get("model", "未设置")
                 parts.append(model)
-                if hasattr(self, '_context_text') and self._context_text:
-                    clean = re.sub(r'\[/?\w+\]', '', self._context_text)
+                if hasattr(self, "_context_text") and self._context_text:
+                    clean = re.sub(r"\[/?\w+\]", "", self._context_text)
                     parts.append(clean)
                 parts.append("普通模式" if not self.yolo else "YOLO 模式")
                 if self.git and self.git_manager and self.git_manager.is_repo():
@@ -401,27 +414,67 @@ class ChatREPL:
                 key_bindings=kb,
                 completer=completer,
                 complete_while_typing=True,
+                reserve_space_for_menu=0,
                 bottom_toolbar=_bottom_toolbar,
-                style=Style.from_dict({
-                    "completion-menu.completion": "bg:#008888 #ffffff",
-                    "completion-menu.completion.current": "bg:#00aaaa #000000",
-                    "completion-menu.meta.completion": "bg:#008888 #ffffff",
-                    "completion-menu.meta.completion.current": "bg:#00aaaa #000000",
-                    "bottom-toolbar": "noreverse bg:#1a1a2e #aaaaaa",
-                }),
+                style=Style.from_dict(
+                    {
+                        "completion-menu.completion": "bg:#008888 #ffffff",
+                        "completion-menu.completion.current": "bg:#00aaaa #000000",
+                        "completion-menu.meta.completion": "bg:#008888 #ffffff",
+                        "completion-menu.meta.completion.current": "bg:#00aaaa #000000",
+                        "bottom-toolbar": "noreverse bg:#1a1a2e #aaaaaa",
+                    }
+                ),
             )
 
+            def _dynamic_buffer_height():
+                buff = self._prompt_session.default_buffer
+                if buff.complete_state is not None:
+                    n = len(buff.complete_state.completions)
+                    needed = min(n + 2, 16)
+                    return Dimension(min=needed, max=needed)
+                return Dimension(min=1, max=1)
+
+            def _find_buffer_window(container):
+                from prompt_toolkit.layout.containers import Window
+                from prompt_toolkit.layout.controls import BufferControl
+
+                if isinstance(container, Window):
+                    if isinstance(getattr(container, "content", None), BufferControl):
+                        return container
+                for attr in ("content", "children", "alternative_content"):
+                    child = getattr(container, attr, None)
+                    if child is None:
+                        continue
+                    children = child if isinstance(child, list) else [child]
+                    for c in children:
+                        result = _find_buffer_window(c)
+                        if result:
+                            return result
+                return None
+
+            buffer_window = _find_buffer_window(
+                self._prompt_session.app.layout.container
+            )
+            if buffer_window:
+                buffer_window.height = _dynamic_buffer_height
+
         try:
-            # 如果有编辑缓冲区，预填充到输入框
+            # 如果有编辑缓冲区或中断恢复缓冲区，预填充到输入框
             if edit_mode:
                 default_text = self._edit_buffer
                 self._edit_buffer = None  # 清除缓冲区
+            elif interrupt_mode:
+                default_text = self._interrupt_buffer
+                self._interrupt_buffer = None  # 清除缓冲区
             else:
                 default_text = ""
 
             width = shutil.get_terminal_size().columns
             sep = "\u2500" * width
-            prompt_text = f"{sep}\n > " if not edit_mode else f"{sep}\n \u270f\ufe0f 编辑模式> "
+            prompt_text = (
+                f"{sep}\n > " if not edit_mode else f"{sep}\n \u270f\ufe0f 编辑模式> "
+            )
 
             # 使用 prompt-toolkit 获取输入（支持命令自动补全）
             result = await asyncio.to_thread(
@@ -482,7 +535,11 @@ class ChatREPL:
         else:
             action = await select(
                 "模型管理:",
-                ["新建模型 (/model new)", "编辑当前模型 (/model edit)", "切换模型 (/model switch)"],
+                [
+                    "新建模型 (/model new)",
+                    "编辑当前模型 (/model edit)",
+                    "切换模型 (/model switch)",
+                ],
             )
             if action is None:
                 return
@@ -500,7 +557,10 @@ class ChatREPL:
             # 重建 agent
             self.agent = await asyncio.to_thread(
                 build_agent,
-                self.model_config, self.checkpointer, None, self.yolo,
+                self.model_config,
+                self.checkpointer,
+                None,
+                self.yolo,
             )
             self._render_status_bar()
 
@@ -573,6 +633,7 @@ class ChatREPL:
                     pre_messages.append(msg)
 
             from chcode.utils.enhanced_chat_openai import EnhancedChatOpenAI
+
             model = EnhancedChatOpenAI(**self.model_config)
 
             human_msg = HumanMessage(
@@ -581,8 +642,11 @@ class ChatREPL:
             )
 
             try:
-                raw_resp = await asyncio.to_thread(model.invoke, pre_messages + [human_msg])
+                raw_resp = await asyncio.to_thread(
+                    model.invoke, pre_messages + [human_msg]
+                )
                 import re
+
                 content = raw_resp.content.strip()
                 if content.startswith("```"):
                     content = re.sub(r"^```(?:json)?\s*\n?", "", content)
@@ -599,7 +663,11 @@ class ChatREPL:
                 ai_message = AIMessage(
                     ai_content,
                     additional_kwargs={"error": True, "composed": True},
-                    usage_metadata={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+                    usage_metadata={
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                    },
                 )
             else:
                 ai_message = AIMessage(
@@ -619,7 +687,9 @@ class ChatREPL:
 
     async def _cmd_git(self, _arg: str) -> None:
         if not self.git_manager:
-            is_available, status, version = await asyncio.to_thread(check_git_availability)
+            is_available, status, version = await asyncio.to_thread(
+                check_git_availability
+            )
             if is_available:
                 render_success(f"Git {version}")
                 await self._init_git()
@@ -644,7 +714,10 @@ class ChatREPL:
         # 重建 agent 以更新 HITL 配置
         self.agent = await asyncio.to_thread(
             build_agent,
-            self.model_config, self.checkpointer, None, self.yolo,
+            self.model_config,
+            self.checkpointer,
+            None,
+            self.yolo,
         )
         mode_str = "Yolo" if self.yolo else "Common"
         render_success(f"已切换到 {mode_str} 模式")
@@ -681,7 +754,10 @@ class ChatREPL:
         self.checkpointer = await create_checkpointer(db_path)
         self.agent = await asyncio.to_thread(
             build_agent,
-            self.model_config, self.checkpointer, None, self.yolo,
+            self.model_config,
+            self.checkpointer,
+            None,
+            self.yolo,
         )
 
         await self._init_git()
@@ -690,6 +766,7 @@ class ChatREPL:
 
     async def _cmd_help(self, _arg: str) -> None:
         from rich.table import Table
+
         table = Table(title="命令列表")
         table.add_column("命令", style="cyan")
         table.add_column("说明")
@@ -772,7 +849,9 @@ class ChatREPL:
             return
 
         # 确认
-        ok = await confirm(f"确定编辑此消息组？编辑后将删除此消息组之后的所有内容。", default=False)
+        ok = await confirm(
+            f"确定编辑此消息组？编辑后将删除此消息组之后的所有内容。", default=False
+        )
         if not ok:
             return
 
@@ -815,7 +894,9 @@ class ChatREPL:
             options.append(f"[{idx + 1}] {display}")
 
         # 用户选择 Fork 点
-        chosen = await _select_with_other_async("选择 Fork 点（此消息组将保留在分支中）:", options)
+        chosen = await _select_with_other_async(
+            "选择 Fork 点（此消息组将保留在分支中）:", options
+        )
         if not chosen:
             return
 
@@ -878,6 +959,7 @@ class ChatREPL:
                 sessions_path = self.workplace_path / ".chat" / "sessions"
                 if sessions_path.exists():
                     import shutil
+
                     await asyncio.to_thread(shutil.rmtree, sessions_path)
                     sessions_path.mkdir(exist_ok=True)
             except Exception as e:
@@ -891,7 +973,10 @@ class ChatREPL:
         # 重建 agent
         self.agent = await asyncio.to_thread(
             build_agent,
-            self.model_config, self.checkpointer, None, self.yolo,
+            self.model_config,
+            self.checkpointer,
+            None,
+            self.yolo,
         )
 
         # 保留 Fork 点及之前的所有消息
@@ -942,7 +1027,9 @@ class ChatREPL:
             options.append(f"[{idx + 1}] {display}")
 
         # 多选
-        chosen_list = await checkbox("选择要删除的消息组（空格选择，回车确认）:", options)
+        chosen_list = await checkbox(
+            "选择要删除的消息组（空格选择，回车确认）:", options
+        )
         if not chosen_list:
             return
 
@@ -984,6 +1071,7 @@ class ChatREPL:
     def _copy_dir(self, src: Path, dst: Path):
         """复制目录（同步版本）"""
         import shutil
+
         for item in src.iterdir():
             if item.name.startswith("."):
                 continue  # 跳过隐藏文件/目录
@@ -1001,7 +1089,7 @@ class ChatREPL:
         pass
 
     async def _update_context_usage(self) -> None:
-        """从 agent state 更新上下文用量缓存"""
+        """从 agent state 更新上下文用量和 token 消耗缓存"""
         if not self.agent or not self.session_mgr:
             return
         try:
@@ -1019,21 +1107,25 @@ class ChatREPL:
         """处理用户输入并调用 agent"""
         self._processing = True
         self._stop_requested = False
-        console.print(Text(f"\n> {user_input}", style="bold cyan"))
 
         accumulated_content = ""
         ai_started = False
 
         try:
             input_data = {"messages": user_input}
-            pre_messages = (await self.agent.aget_state(self.session_mgr.config)).values.get("messages", [])
+            pre_messages = (
+                await self.agent.aget_state(self.session_mgr.config)
+            ).values.get("messages", [])
 
             from chcode.utils.skill_loader import SkillLoader
+
             skill_agent_context = SkillAgentContext(
-                skill_loader=SkillLoader([
-                    self.workplace_path / ".chat/skills",
-                    Path.home() / ".chat/skills",
-                ]),
+                skill_loader=SkillLoader(
+                    [
+                        self.workplace_path / ".chat/skills",
+                        Path.home() / ".chat/skills",
+                    ]
+                ),
                 working_directory=self.workplace_path,
                 model_config=self.model_config or INNER_MODEL_CONFIG,
             )
@@ -1076,7 +1168,8 @@ class ChatREPL:
                             interrupt_chunk = i
 
                 except asyncio.CancelledError:
-                    await self._write_interrupted_message(accumulated_content)
+                    if user_input.strip():
+                        self._interrupt_buffer = user_input.strip()
                     console.print(Text("\n[已中断]", style="dim"), "\n")
                     break
                 except openai.APIError as e:
@@ -1129,7 +1222,9 @@ class ChatREPL:
 
             # Git 提交（静默）
             if self.git and self.git_manager:
-                current_messages = (await self.agent.aget_state(self.session_mgr.config)).values.get("messages", [])
+                current_messages = (
+                    await self.agent.aget_state(self.session_mgr.config)
+                ).values.get("messages", [])
                 new_msgs = find_and_slice_from_end(current_messages, "human")
                 ids = [m.id for m in new_msgs]
                 self.git_manager.add_commit("&".join(ids))
@@ -1143,7 +1238,9 @@ class ChatREPL:
         for interrupt in interrupt_chunk["__interrupt__"]:
             action_requests = interrupt.value["action_requests"]
             review_configs = interrupt.value["review_configs"]
-            review_dict = {i["action_name"]: i["allowed_decisions"] for i in review_configs}
+            review_dict = {
+                i["action_name"]: i["allowed_decisions"] for i in review_configs
+            }
 
             for action_request in action_requests:
                 name = action_request["name"]
@@ -1178,30 +1275,6 @@ class ChatREPL:
 
         return decisions
 
-    async def _write_interrupted_message(self, accumulated_content: str) -> None:
-        """写入中断消息到 checkpoint"""
-        try:
-            state = await self.agent.aget_state(self.session_mgr.config)
-            messages = state.values.get("messages", [])
-            if messages and isinstance(messages[-1], AIMessage):
-                return
-            content = accumulated_content.strip()
-            if not content:
-                content = "[这条消息已被用户中断]"
-            else:
-                content += "\n\n[这条消息已被用户中断]"
-            msg = AIMessage(
-                content,
-                additional_kwargs={"interrupted": True, "composed": True},
-            )
-            await self.agent.aupdate_state(
-                self.session_mgr.config,
-                {"messages": [msg]},
-                as_node="model",
-            )
-        except Exception:
-            pass
-
     async def _load_conversation(self) -> None:
         """加载当前会话的对话历史并渲染"""
         if not self.agent:
@@ -1212,4 +1285,3 @@ class ChatREPL:
             render_conversation(messages)
         except Exception as e:
             render_error(f"加载对话失败: {e}")
-

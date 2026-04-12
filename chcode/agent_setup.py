@@ -105,18 +105,12 @@ async def load_model(
 async def fix_messages(
     request: ModelRequest, handler: Callable[[ModelRequest], ModelResponse]
 ) -> ModelResponse:
-    """过滤隐藏消息，统计 tokens"""
+    """过滤隐藏消息"""
     messages = request.messages
     real_messages = []
-    tokens = 0
     for message in messages:
         if not message.additional_kwargs.get("composed", ""):
             real_messages.append(message)
-            if isinstance(message, AIMessage):
-                usage = message.usage_metadata
-                if usage:
-                    tokens += usage.get("total_tokens", 0)
-    print(f"tokens: {tokens}")
     return await handler(request.override(messages=real_messages))
 
 
