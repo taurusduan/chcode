@@ -13,9 +13,25 @@ from rich import box
 from rich.table import Table
 from rich.text import Text
 from rich.markup import escape
-from rich.live import Live
-from rich.layout import Layout
 from rich.rule import Rule
+from rich.live import Live
+
+import asyncio
+import contextvars
+import threading
+import time
+
+_subagent_count = 0
+_subagent_count_lock = threading.Lock()
+_subagent_parallel = False
+
+_current_agent_tag: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_current_agent_tag", default=None
+)
+_agent_progress: dict[str, dict] = {}
+_agent_progress_lock = threading.Lock()
+_progress_live: Live | None = None
+_progress_task: asyncio.Task | None = None
 
 if TYPE_CHECKING:
     from langchain_core.messages import AIMessageChunk, ToolMessage, BaseMessage
@@ -23,6 +39,7 @@ if TYPE_CHECKING:
 console = Console()
 
 # ─── 消息渲染 ──────────────────────────────────────────
+
 
 def render_human(message: str) -> None:
     """渲染用户消息"""
@@ -39,22 +56,36 @@ def render_human(message: str) -> None:
 
 def render_ai_chunk(content: str) -> None:
     """渲染 AI 回复片段（流式）"""
+    if _subagent_parallel or _subagent_count > 0:
+        return
     console.print(content, end="", style="white")
 
 
-def render_ai_start() -> None:
+def render_ai_start():
     """AI 回复开始"""
+    global _subagent_parallel
+    # 先完成并清理之前的进度显示
+    _finalize_progress()
+    _subagent_parallel = False
+    with _agent_progress_lock:
+        _agent_progress.clear()
+    if _subagent_count > 0:
+        return
     console.print()
     console.print("[bold cyan]AI[/bold cyan]", end="")
 
 
 def render_ai_end() -> None:
     """AI 回复结束"""
+    if _subagent_parallel or _subagent_count > 0:
+        return
     console.print()
 
 
 def render_reasoning(reasoning: str) -> None:
     """渲染推理/思考内容（灰色斜体，折叠）"""
+    if _subagent_parallel or _subagent_count > 0:
+        return
     console.print(
         Panel(
             Text(reasoning, style="dim italic"),
@@ -66,15 +97,100 @@ def render_reasoning(reasoning: str) -> None:
     )
 
 
+def _start_progress():
+    global _progress_live
+    if _progress_live is None:
+        _progress_live = Live("", transient=True, console=console, refresh_per_second=1)
+        _progress_live.start()
+
+
+def _stop_progress():
+    global _progress_live
+    if _progress_live:
+        _progress_live.stop()
+        _progress_live = None
+
+
+def _update_progress():
+    if not _progress_live:
+        return
+    with _agent_progress_lock:
+        if not _agent_progress:
+            _progress_live.update("")
+            return
+        now = time.time()
+        lines = []
+        for tag, info in _agent_progress.items():
+            elapsed = int(now - info["start"])
+            timeout = info.get("timeout", 300)
+
+            if info.get("failed"):
+                lines.append(f"  [red]\u274c {tag}: \u8d85\u65f6 ({timeout}s)[/red]")
+            elif info.get("done"):
+                lines.append(f"  [green]\u2705 {tag}: done ({elapsed}s)[/green]")
+            else:
+                remaining = max(0, timeout - elapsed)
+                pct = min(elapsed / timeout, 1.0) if timeout > 0 else 1.0
+                bar_len = int(pct * 16)
+                bar = "\u2588" * bar_len + "\u2591" * (16 - bar_len)
+                lines.append(f"  {tag}: {remaining}s \u5269\u4f59 [{bar}]")
+    _progress_live.update("\n".join(lines))
+
+
+async def _progress_updater():
+    """定期更新进度显示的后台任务"""
+    try:
+        while True:
+            await asyncio.sleep(1)
+            if _progress_live is None:
+                break
+            _update_progress()
+    except asyncio.CancelledError:
+        pass  # 优雅处理取消
+
+
+def _finalize_progress():
+    """停止进度显示，打印最终状态并清理资源"""
+    global _progress_live, _progress_task
+
+    # 先取消更新任务
+    if _progress_task is not None and not _progress_task.done():
+        _progress_task.cancel()
+        _progress_task = None
+
+    # 停止 Live（transient=True 会自动清除显示内容）
+    if _progress_live is not None:
+        _progress_live.stop()
+        _progress_live = None
+
+    # 清空进度数据
+    with _agent_progress_lock:
+        _agent_progress.clear()
+
+
 def render_tool_call(name: str, summary: str) -> None:
-    """渲染工具调用头部 — 类似 ask_user 的风格"""
+    tag = _current_agent_tag.get()
+    if tag:
+        with _agent_progress_lock:
+            if tag in _agent_progress:
+                _agent_progress[tag]["calls"] += 1
     if len(summary) > 120:
         summary = summary[:117] + "..."
+    if name == "agent":
+        console.print(Text(f"\n[{name}] {summary}", style="bold cyan"))
+        return
+    if _subagent_parallel or _subagent_count >= 2:
+        return
+    if _subagent_count == 1:
+        console.print(Text(f"  [{name}] {summary}", style="dim cyan"))
+        return
     console.print(Text(f"\n[{name}] {summary}", style="bold cyan"))
 
 
 def render_tool(name: str, content: str) -> None:
     """渲染工具调用结果"""
+    if _subagent_parallel or _subagent_count > 0:
+        return
     # 截断过长内容
     lines = content.split("\n")
     if len(lines) > 50:
@@ -92,21 +208,29 @@ def render_tool(name: str, content: str) -> None:
 
 def render_error(message: str) -> None:
     """渲染错误信息"""
+    if _subagent_parallel or _subagent_count > 0:
+        return
     console.print(Text("Error: ", style="red bold"), Text(message, style="red bold"))
 
 
 def render_info(message: str) -> None:
     """渲染信息"""
+    if _subagent_parallel or _subagent_count > 0:
+        return
     console.print(f"[cyan]{message}[/cyan]")
 
 
 def render_success(message: str) -> None:
     """渲染成功信息"""
+    if _subagent_parallel or _subagent_count > 0:
+        return
     console.print(f"[green]{message}[/green]")
 
 
 def render_warning(message: str) -> None:
     """渲染警告信息"""
+    if _subagent_parallel or _subagent_count > 0:
+        return
     console.print(f"[yellow]{message}[/yellow]")
 
 
@@ -131,6 +255,7 @@ def render_welcome() -> None:
 
 
 # ─── 状态栏 ──────────────────────────────────────────
+
 
 def render_status(
     workplace: str = "",
@@ -210,11 +335,13 @@ def render_conversation(messages: list) -> None:
 
 # ─── Token 统计 ──────────────────────────────────────────
 
+
 def get_token_text(messages: list) -> str:
     """从消息列表提取最新 AI 消息的 token 统计"""
     total = input_t = output_t = 0
     for message in reversed(messages):
         from langchain_core.messages import AIMessage
+
         if isinstance(message, AIMessage):
             if message.additional_kwargs.get("error"):
                 continue
@@ -228,6 +355,7 @@ def get_token_text(messages: list) -> str:
 
 
 # ─── 上下文用量 ──────────────────────────────────────────
+
 
 def _format_tokens(n: int) -> str:
     """格式化 token 数：123456 → 123.5K"""
@@ -246,6 +374,7 @@ def get_context_usage_text(messages: list, max_context: int) -> str:
     input_tokens = 0
     for message in reversed(messages):
         from langchain_core.messages import AIMessage
+
         if isinstance(message, AIMessage):
             usage = message.usage_metadata
             if usage and usage.get("input_tokens"):
@@ -268,3 +397,107 @@ def get_context_usage_text(messages: list, max_context: int) -> str:
         style = "bold red"
 
     return f"[{style}]{used_str}/{max_str} {pct_str}[/{style}]"
+
+
+# ─── Agent 输出日志渲染 ──────────────────────────────────
+
+
+def render_output_log_list(log_entries: list[dict]) -> None:
+    """
+    渲染 agent 输出日志列表
+
+    Args:
+        log_entries: [{"index": 1, "timestamp": "...", "turns": 3, "preview": "..."}, ...]
+    """
+    if not log_entries:
+        render_warning("没有 agent 输出日志")
+        return
+
+    table = Table(title="Agent 输出日志")
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("时间", style="dim", width=20)
+    table.add_column("轮次", style="green", width=6)
+    table.add_column("预览", style="white")
+
+    for entry in log_entries:
+        table.add_row(
+            str(entry["index"]),
+            entry["timestamp"],
+            str(entry["turns"]),
+            entry["preview"][:80],
+        )
+
+    console.print(table)
+    console.print()
+
+
+def render_output_log_detail(log_data: dict, index: int) -> None:
+    """
+    渲染单条日志的完整内容
+
+    Args:
+        log_data: {"user_input": "...", "turns": [{"type": "...", "content": "..."}, ...]}
+        index: 日志索引
+    """
+    console.print()
+    console.print(
+        Panel(
+            f"[bold]日志 #{index}[/bold]\n"
+            f"[dim]用户输入: {escape(log_data.get('user_input', '')[:100])}[/dim]",
+            border_style="cyan",
+            padding=(0, 1),
+        )
+    )
+    console.print()
+
+    for i, turn in enumerate(log_data.get("turns", []), 1):
+        turn_type = turn.get("type", "unknown")
+        content = turn.get("content", "")
+
+        if turn_type == "ai_response":
+            console.print(
+                Panel(
+                    Markdown(content),
+                    border_style="blue",
+                    title=f"AI 回复 (Turn {i})",
+                    title_align="left",
+                    padding=(0, 1),
+                )
+            )
+        elif turn_type == "reasoning":
+            console.print(
+                Panel(
+                    Text(content, style="dim italic"),
+                    border_style="dim",
+                    title=f"思考 (Turn {i})",
+                    title_align="left",
+                    padding=(0, 1),
+                )
+            )
+        elif turn_type == "tool_call":
+            tool_name = turn.get("tool_name", "unknown")
+            console.print(
+                Panel(
+                    Text(content, style="yellow"),
+                    border_style="yellow",
+                    title=f"工具调用: {tool_name} (Turn {i})",
+                    title_align="left",
+                    padding=(0, 1),
+                )
+            )
+        elif turn_type == "tool_result":
+            tool_name = turn.get("tool_name", "unknown")
+            # 截断过长的结果
+            if len(content) > 500:
+                content = content[:500] + f"\n... ({len(content) - 500} more chars)"
+            console.print(
+                Panel(
+                    Text(content, style="green"),
+                    border_style="green",
+                    title=f"工具结果: {tool_name} (Turn {i})",
+                    title_align="left",
+                    padding=(0, 1),
+                )
+            )
+
+        console.print()

@@ -553,6 +553,8 @@ class SkillAgentContext:
     skill_loader: SkillLoader
     model_config: dict
     working_directory: Path
+    thread_id: str = ""
+    extra: dict = field(default_factory=dict)
     # working_directory: Path = field(default_factory=lambda: Path.cwd())
 
 

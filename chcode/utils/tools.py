@@ -592,8 +592,12 @@ def _html_to_markdown(html: str) -> str:
 
         return md(html)
     except ImportError:
-        text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(
+            r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE
+        )
+        text = re.sub(
+            r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE
+        )
         text = re.sub(r"<[^>]+>", " ", text)
         text = re.sub(r"\s+", " ", text).strip()
         return text
@@ -615,7 +619,7 @@ def _is_binary_content_type(content_type: str) -> bool:
 
 @tool
 def web_fetch(url: str) -> dict:
-    """Fetches content from a specified URL and converts it to text. """
+    """Fetches content from a specified URL and converts it to text."""
     render_tool_call("web_fetch", url)
     start = time.time()
 
@@ -677,10 +681,9 @@ def web_fetch(url: str) -> dict:
 
         if len(markdown_content) > MAX_MARKDOWN_LENGTH:
             markdown_content = (
-                markdown_content[:MAX_MARKDOWN_LENGTH] + "\n\n[Content truncated due to length...]"
+                markdown_content[:MAX_MARKDOWN_LENGTH]
+                + "\n\n[Content truncated due to length...]"
             )
-
-
 
         result = f"Content from {url}:\n\n{markdown_content}\n\n---"
         # resp=model.invoke(f"Extract effective message from {url}:\n\n{markdown_content}")
@@ -753,7 +756,9 @@ def _select_with_other(question: str, options: list[str]) -> str | None:
         def get_invalidate_events(self):
             yield self.buffer.on_text_changed
 
-        def preferred_height(self, width, max_available_height, wrap_lines, get_line_prefix):
+        def preferred_height(
+            self, width, max_available_height, wrap_lines, get_line_prefix
+        ):
             return len(self.all_opts)
 
         def create_content(self, width: int, height: int) -> UIContent:
@@ -791,9 +796,7 @@ def _select_with_other(question: str, options: list[str]) -> str | None:
             # 计算光标位置
             cursor_pos = None
             if self.selected == other_idx:
-                # 光标在"其它"输入框内
-                # 关键：用 len() 而非 get_cwidth() 计算前缀宽度
-                # 因为其他选项可能含 emoji，但"其它: "前缀是纯文本，宽度固定
+                # 关键：用 get_cwidth() 计算前缀宽度
                 prefix_width = get_cwidth(other_prefix)
                 cursor_x = prefix_width + self.buffer.cursor_position
                 cursor_pos = Point(x=cursor_x, y=other_idx)
@@ -849,7 +852,6 @@ def _select_with_other(question: str, options: list[str]) -> str | None:
         _exiting = True
         chosen = control.all_opts[control.selected]
         if chosen == "\u5176\u5b83":
-            # 其它选项：提交输入框内容
             text = control.buffer.text.strip()
             if text:
                 e.app.exit(result=text)
@@ -866,7 +868,6 @@ def _select_with_other(question: str, options: list[str]) -> str | None:
     def _cancel(e):
         e.app.exit(result=None)
 
-    # 捕获所有按键 — 选中"其它"时转发到 buffer
     @kb.add(Keys.Any)
     def _any(e):
         nonlocal _exiting
@@ -927,7 +928,9 @@ async def _select_with_other_async(question: str, options: list[str]) -> str | N
         def get_invalidate_events(self):
             yield self.buffer.on_text_changed
 
-        def preferred_height(self, width, max_available_height, wrap_lines, get_line_prefix):
+        def preferred_height(
+            self, width, max_available_height, wrap_lines, get_line_prefix
+        ):
             return len(self.all_opts)
 
         def create_content(self, width: int, height: int) -> UIContent:
@@ -1050,22 +1053,41 @@ async def _select_with_other_async(question: str, options: list[str]) -> str | N
 
 @tool
 def ask_user(
-    question: str,
-    options: list[str],
+    question: str = "",
+    options: list[str] | None = None,
     is_multiple: bool = False,
+    questions: list[dict] | None = None,
 ) -> str:
     """
-    Ask the user a question interactively with predefined options.
+    Ask the user one or more questions interactively with predefined options.
 
     Use this when you need clarification, user preferences, or choices
-    before proceeding. The user will see a dropdown or checkbox in the terminal.
+    before proceeding. The user will see dropdown menus or checkboxes in the terminal.
+
+    Single question mode (default):
+        ask_user(question="What's your preference?", options=["A", "B", "C"])
+
+    Batch questions mode (asks all questions sequentially):
+        ask_user(questions=[
+            {"question": "What database?", "options": ["PostgreSQL", "MySQL"]},
+            {"question": "What framework?", "options": ["React", "Vue"], "is_multiple": true},
+        ])
 
     Args:
-        question: The question to ask the user
-        options: List of options for the user to choose from
-        is_multiple: If True, allow selecting multiple options; otherwise single select
+        question: The question to ask (ignored if questions is provided)
+        options: List of options for single question mode (ignored if questions is provided)
+        is_multiple: If True in single-question mode, allow selecting multiple options
+        questions: List of question dicts for batch mode. Each dict must have:
+                   - "question": the question text (required)
+                   - "options": list of choices (optional, falls back to text input)
+                   - "is_multiple": bool for checkbox vs single select (default: false)
+                   When provided, all questions are asked sequentially. Overrides question/options.
     """
+    import asyncio
     import questionary
+
+    if questions:
+        return asyncio.run(_ask_multi_questions(questions))
 
     render_tool_call("ask_user", question)
 
@@ -1085,7 +1107,6 @@ def ask_user(
                 return "user_answer:\n(用户取消)"
             result = ", ".join(selected)
         else:
-            import asyncio
             try:
                 answer = asyncio.run(_select_with_other_async(question, options))
             except RuntimeError:
@@ -1099,4 +1120,207 @@ def ask_user(
         return f"user_answer:\n(询问失败: {e})"
 
 
-ALL_TOOLS = [load_skill, bash, read_file, write_file, glob, grep, edit, list_dir, web_search, web_fetch, ask_user]
+async def _ask_multi_questions(questions: list[dict]) -> str:
+    """
+    多问题批量提问界面
+
+    Args:
+        questions: List of {"question": "...", "options": ["..."], "is_multiple": false}
+    Returns:
+        Formatted string with all answers
+    """
+    import asyncio
+    import questionary
+    from rich.console import Console
+
+    console = Console()
+
+    # 渲染问题列表
+    console.print()
+    console.print(f"[bold cyan]📋 批量提问 ({len(questions)} 个问题)[/bold cyan]")
+    console.print()
+
+    answers = []
+    for i, q in enumerate(questions, 1):
+        q_text = q.get("question", "")
+        q_options = q.get("options", [])
+        q_multiple = q.get("is_multiple", False)
+
+        console.print(f"[dim]问题 {i}/{len(questions)}: {q_text}[/dim]")
+
+        if not q_options:
+            answer = await asyncio.to_thread(
+                lambda: questionary.text("请输入: ").ask()
+            )
+            if answer is None:
+                answers.append(f"Q{i}: (用户取消)")
+                continue
+            answers.append(f"Q{i}: {answer}")
+        else:
+            try:
+                if q_multiple:
+                    selected = await asyncio.to_thread(
+                        lambda: questionary.checkbox(
+                            "选择（空格选择，回车确认）:",
+                            choices=q_options,
+                        ).ask()
+                    )
+                    if selected is None:
+                        answers.append(f"Q{i}: (用户取消)")
+                        continue
+                    result = ", ".join(selected)
+                else:
+                    # 批量模式使用 questionary.select（不用自定义 UI）
+                    choices = list(q_options) + ["其它"]
+                    selected = await asyncio.to_thread(
+                        lambda: questionary.select(
+                            message=q_text,
+                            choices=choices,
+                        ).ask()
+                    )
+                    if selected is None:
+                        answers.append(f"Q{i}: (用户取消)")
+                        continue
+                    if selected == "其它":
+                        console.print("[dim]请输入自定义回答:[/dim]")
+                        text = await asyncio.to_thread(
+                            lambda: questionary.text("").ask()
+                        )
+                        if text is None:
+                            answers.append(f"Q{i}: (用户取消)")
+                            continue
+                        result = text
+                    else:
+                        result = selected
+                answers.append(f"Q{i}: {result}")
+            except Exception as e:
+                answers.append(f"Q{i}: (询问失败: {e})")
+
+        console.print()
+
+    # 汇总结果
+    result_lines = ["=== 批量提问结果 ==="]
+    for i, q in enumerate(questions, 1):
+        result_lines.append(f"问题: {q.get('question', '')}\n回答: {answers[i-1]}")
+    return "\n\n".join(result_lines)
+
+
+@tool
+async def agent(
+    prompt: str,
+    subagent_type: str = "general-purpose",
+    description: str = "",
+    timeout_seconds: int = 300,
+    runtime: ToolRuntime[SkillAgentContext] = None,
+) -> str:
+    """
+    Launch a sub-agent to perform a task autonomously.
+
+    Sub-agents have their own tool set and system prompt. They run independently
+    and return a text report when finished. Use this for complex, multi-step tasks
+    that benefit from focused execution.
+
+    Available sub-agent types:
+    - "general-purpose": Full tool access, can read/write files and run commands. Use for multi-step coding tasks, complex research, or when you need autonomous execution.
+    - "Explore": Read-only agent specialized in codebase exploration. Use for finding files by pattern, searching code, answering questions about the codebase. Fast and efficient.
+    - "Plan": Read-only agent for designing implementation plans. Use for architectural analysis, step-by-step implementation strategies, identifying critical files.
+
+    Custom agents can also be loaded from .chat/agents/*.md files.
+
+    Args:
+        prompt: The task description for the sub-agent. Be specific about what to find, analyze, or do.
+        subagent_type: Type of sub-agent to launch ("general-purpose", "Explore", "Plan", or a custom agent name).
+        description: Short description of what this sub-agent invocation does (for display purposes).
+        timeout_seconds: Maximum seconds the sub-agent can run before being terminated. Default 300 (5 minutes). Must be greater than 300 (5 minutes) to allow sufficient execution time.
+    """
+    import asyncio
+    import time
+
+    import chcode.display as _display
+    from chcode.agents.loader import load_agents
+    from chcode.agents.runner import run_subagent
+
+    tag = f"{subagent_type}: {(description or '')[:30]}"
+    render_tool_call("agent", f"{subagent_type}: {description or prompt[:60]}")
+
+    all_agents = load_agents()
+    agent_def = all_agents.get(subagent_type)
+
+    if agent_def is None:
+        available = ", ".join(sorted(all_agents.keys()))
+        return f"Unknown agent type '{subagent_type}'. Available types: {available}"
+
+    model_config = runtime.context.model_config
+    working_directory = runtime.context.working_directory
+    skill_loader = runtime.context.skill_loader
+
+    _display._current_agent_tag.set(tag)
+    with _display._agent_progress_lock:
+        _display._agent_progress[tag] = {
+            "calls": 0,
+            "start": time.time(),
+            "timeout": timeout_seconds,
+            "failed": False,
+        }
+
+    with _display._subagent_count_lock:
+        _display._subagent_count += 1
+        if _display._subagent_count >= 2:
+            _display._subagent_parallel = True
+            _display._start_progress()
+            if _display._progress_task is None or _display._progress_task.done():
+                _display._progress_task = asyncio.ensure_future(
+                    _display._progress_updater()
+                )
+
+    try:
+        result = await run_subagent(
+            prompt=prompt,
+            agent_def=agent_def,
+            model_config=model_config,
+            working_directory=working_directory,
+            skill_loader=skill_loader,
+            timeout_seconds=timeout_seconds,
+            description=description,
+        )
+
+        with _display._agent_progress_lock:
+            if tag in _display._agent_progress:
+                # 检查是否超时或出错
+                if result and ("timed out" in result or "error:" in result.lower()):
+                    _display._agent_progress[tag]["failed"] = True
+                else:
+                    _display._agent_progress[tag]["done"] = True
+        # 触发一次立即更新
+        _display._update_progress()
+
+        if not _display._subagent_parallel and result:
+            from rich.text import Text
+
+            for line in result.splitlines():
+                _display.console.print(Text(f"  {line}", style="dim"))
+    finally:
+        _display._current_agent_tag.set(None)
+        with _display._subagent_count_lock:
+            _display._subagent_count -= 1
+            if _display._subagent_count == 0:
+                _display._subagent_parallel = False
+                _display._finalize_progress()
+
+    return result
+
+
+ALL_TOOLS = [
+    load_skill,
+    bash,
+    read_file,
+    write_file,
+    glob,
+    grep,
+    edit,
+    list_dir,
+    web_search,
+    web_fetch,
+    ask_user,
+    agent,
+]
