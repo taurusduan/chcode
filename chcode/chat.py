@@ -52,8 +52,6 @@ from chcode.display import (
     render_ai_end,
     render_tool_call,
     get_context_usage_text,
-    render_output_log_list,
-    render_output_log_detail,
 )
 from chcode.prompts import select, confirm, select_or_custom, text, checkbox
 from chcode.config import (
@@ -96,7 +94,6 @@ SLASH_COMMANDS = {
     "/edit": "编辑历史消息",
     "/fork": "从某条消息创建分支",
     "/delete": "删除历史消息",
-    "/output": "查看 Agent 输出日志",
     "/help": "显示帮助",
     "/quit": "退出",
 }
@@ -222,9 +219,6 @@ class ChatREPL:
         # 上下文用量缓存
         self._context_text: str = ""
         # Agent 输出日志收集
-        self._agent_output_logs: list[dict] = []
-        self._current_log_turns: list[dict] = []
-        self._current_log_index: int = 0
 
     # ─── 清理 ────────────────────────────────────────
 
@@ -496,7 +490,6 @@ class ChatREPL:
             "/help": self._cmd_help,
             "/quit": self._cmd_quit,
             "/status": self._cmd_status,
-            "/output": self._cmd_output,
         }
 
         handler = handlers.get(command)
@@ -771,7 +764,6 @@ class ChatREPL:
             ("/edit", "编辑历史消息"),
             ("/fork", "从某条消息创建分支"),
             ("/delete", "删除历史消息"),
-            ("/output", "查看 Agent 输出日志"),
             ("/status", "显示状态栏"),
             ("/help", "显示此帮助"),
             ("/quit", "退出"),
@@ -785,45 +777,6 @@ class ChatREPL:
 
     async def _cmd_status(self, _arg: str) -> None:
         self._render_status_bar()
-
-    async def _cmd_output(self, arg: str) -> None:
-        """查看 agent 输出日志"""
-        if not self._agent_output_logs:
-            render_warning("没有 agent 输出日志")
-            return
-
-        if not arg:
-            # 显示日志列表
-            log_entries = []
-            for log in self._agent_output_logs:
-                log_entries.append(
-                    {
-                        "index": log["index"],
-                        "timestamp": log["timestamp"],
-                        "turns": log["turns"],
-                        "preview": log["preview"],
-                    }
-                )
-            render_output_log_list(log_entries)
-        else:
-            # 查看具体日志
-            if arg.lower() == "last":
-                log = self._agent_output_logs[-1]
-            else:
-                try:
-                    idx = int(arg) - 1
-                    if idx < 0 or idx >= len(self._agent_output_logs):
-                        render_error(f"日志索引 {arg} 无效")
-                        return
-                    log = self._agent_output_logs[idx]
-                except ValueError:
-                    render_error(f"无效的日志索引: {arg}")
-                    return
-
-            render_output_log_detail(
-                {"user_input": log["user_input"], "turns": log["turns_data"]},
-                log["index"],
-            )
 
     # ─── 消息管理命令 ──────────────────────────────────
 
@@ -1137,12 +1090,6 @@ class ChatREPL:
         accumulated_content = ""
         ai_started = False
 
-        # 初始化日志收集
-        self._current_log_turns = []
-        self._current_log_index = len(self._agent_output_logs) + 1
-        current_reasoning = ""
-        current_response = ""
-
         try:
             input_data = {"messages": user_input}
 
@@ -1188,7 +1135,6 @@ class ChatREPL:
                                         and _display._subagent_count == 0
                                     ):
                                         console.print(reasoning, end="", style="dim")
-                                    current_reasoning += reasoning
                                 if not ai_started:
                                     if not content:
                                         continue
@@ -1196,33 +1142,9 @@ class ChatREPL:
                                     render_ai_start()
                                 render_ai_chunk(content or "")
                                 accumulated_content += content or ""
-                                current_response += content or ""
-
-                                # 收集工具调用信息
-                                tool_calls = getattr(i[0], "tool_calls", None) or []
-                                for tc in tool_calls:
-                                    tc_name = tc.get("name", "unknown")
-                                    tc_args = str(tc.get("args", {}))[:300]
-                                    self._current_log_turns.append(
-                                        {
-                                            "type": "tool_call",
-                                            "tool_name": tc_name,
-                                            "content": f"参数: {tc_args}",
-                                        }
-                                    )
 
                             elif isinstance(i[0], ToolMessage):
                                 ai_started = False
-                                # 保存工具调用结果
-                                tool_name = i[0].name or "unknown"
-                                tool_result = str(content)[:2000]  # 限制长度
-                                self._current_log_turns.append(
-                                    {
-                                        "type": "tool_result",
-                                        "tool_name": tool_name,
-                                        "content": tool_result,
-                                    }
-                                )
 
                         elif m == "updates" and "__interrupt__" in i:
                             interrupt_chunk = i
@@ -1276,41 +1198,6 @@ class ChatREPL:
             if ai_started:
                 render_ai_end()
 
-                # 保存本轮日志
-                if current_reasoning:
-                    self._current_log_turns.append(
-                        {
-                            "type": "reasoning",
-                            "content": current_reasoning,
-                        }
-                    )
-                if current_response:
-                    self._current_log_turns.append(
-                        {
-                            "type": "ai_response",
-                            "content": current_response,
-                        }
-                    )
-
-                if self._current_log_turns:
-                    preview = (
-                        current_response[:100] if current_response else "(无回复内容)"
-                    )
-                    from datetime import datetime
-
-                    self._agent_output_logs.append(
-                        {
-                            "index": self._current_log_index,
-                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "turns": len(self._current_log_turns),
-                            "preview": preview,
-                            "user_input": user_input[:200],
-                            "turns_data": self._current_log_turns.copy(),
-                        }
-                    )
-                    # 保存到文件
-                    self._save_output_log()
-
             # 更新上下文用量并刷新状态栏
             await self._update_context_usage()
             self._render_status_bar()
@@ -1326,48 +1213,6 @@ class ChatREPL:
 
         finally:
             self._processing = False
-
-    def _save_output_log(self) -> None:
-        """将当前 agent 输出日志保存到文件"""
-        if not self._current_log_turns or not self.workplace_path:
-            return
-
-        outputs_dir = self.workplace_path / ".chat" / "outputs"
-        outputs_dir.mkdir(parents=True, exist_ok=True)
-
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        log_file = outputs_dir / f"{timestamp}.log"
-
-        with open(log_file, "w", encoding="utf-8") as f:
-            f.write(f"# Agent Output Log #{self._current_log_index}\n")
-            f.write(f"# Timestamp: {timestamp}\n")
-            f.write(f"# User Input: {self._agent_output_logs[-1]['user_input']}\n")
-            f.write("=" * 80 + "\n\n")
-
-            for i, turn in enumerate(self._current_log_turns, 1):
-                turn_type = turn.get("type", "unknown")
-                content = turn.get("content", "")
-
-                if turn_type == "ai_response":
-                    f.write(f"## AI Response (Turn {i})\n\n")
-                    f.write(content)
-                    f.write("\n\n" + "-" * 60 + "\n\n")
-                elif turn_type == "reasoning":
-                    f.write(f"## Thinking (Turn {i})\n\n")
-                    f.write(content)
-                    f.write("\n\n" + "-" * 60 + "\n\n")
-                elif turn_type == "tool_call":
-                    tool_name = turn.get("tool_name", "unknown")
-                    f.write(f"## Tool Call: {tool_name} (Turn {i})\n\n")
-                    f.write(content)
-                    f.write("\n\n" + "-" * 60 + "\n\n")
-                elif turn_type == "tool_result":
-                    tool_name = turn.get("tool_name", "unknown")
-                    f.write(f"## Tool Result: {tool_name} (Turn {i})\n\n")
-                    f.write(content[:5000])  # 限制长度
-                    if len(content) > 5000:
-                        f.write(f"\n... (truncated, {len(content) - 5000} more chars)")
-                    f.write("\n\n" + "-" * 60 + "\n\n")
 
     async def _collect_decisions_async(self, interrupt_chunk) -> list[dict]:
         """收集 HITL 决策"""
