@@ -727,150 +727,6 @@ def web_fetch(url: str) -> dict:
         }
 
 
-def _select_with_other(question: str, options: list[str]) -> str | None:
-    """
-    下拉选择 + 自定义输入框（同步版本）。
-    输入行始终可见，用上下箭头或 Tab 移动到输入行直接输入。
-    """
-    from prompt_toolkit import Application
-    from prompt_toolkit.buffer import Buffer
-    from prompt_toolkit.key_binding import KeyBindings
-    from prompt_toolkit.layout import Layout, UIContent
-    from prompt_toolkit.layout.controls import (
-        FormattedTextControl,
-        BufferControl,
-        UIControl,
-    )
-    from prompt_toolkit.layout.containers import HSplit, Window
-
-    input_buffer = Buffer()
-    input_row_idx = len(options)
-
-    class _SelectControl(UIControl):
-        def __init__(self, opts: list[str]):
-            self.opts = opts
-            self.selected = 0
-
-        def is_focusable(self) -> bool:
-            return True
-
-        def get_invalidate_events(self):
-            yield input_buffer.on_text_changed
-
-        def preferred_height(
-            self, width, max_available_height, wrap_lines, get_line_prefix
-        ):
-            return len(self.opts) + 1
-
-        def create_content(self, width: int, height: int) -> UIContent:
-            lines = []
-            for i, opt in enumerate(self.opts):
-                prefix = "  ❯ " if i == self.selected else "    "
-                line = f"{prefix}{opt}"
-                style = "bold" if i == self.selected else ""
-                lines.append([(style, line)])
-
-            input_text = input_buffer.text or ""
-            input_prefix = "  ❯ " if self.selected == input_row_idx else "    "
-            input_line = f"{input_prefix}> {input_text}"
-            input_style = "bold" if self.selected == input_row_idx else ""
-            lines.append([(input_style, input_line)])
-
-            def get_line(i):
-                return lines[i] if i < len(lines) else [("", "")]
-
-            return UIContent(
-                get_line=get_line,
-                line_count=len(lines),
-            )
-
-    control = _SelectControl(options)
-
-    question_window = Window(
-        height=1,
-        content=FormattedTextControl(text=f"? {question}"),
-        dont_extend_height=True,
-    )
-    control_window = Window(content=control)
-
-    input_edit = Window(
-        content=BufferControl(buffer=input_buffer),
-        height=1,
-        dont_extend_height=True,
-        char=" ",
-    )
-
-    kb = KeyBindings()
-    _exiting = False
-
-    @kb.add("up")
-    def _up(e):
-        nonlocal _exiting
-        if _exiting:
-            return
-        if control.selected > 0:
-            control.selected -= 1
-            if control.selected < input_row_idx:
-                e.app.layout.focus(control_window)
-            else:
-                e.app.layout.focus(input_edit)
-        e.app.invalidate()
-
-    @kb.add("down")
-    def _down(e):
-        nonlocal _exiting
-        if _exiting:
-            return
-        if control.selected < input_row_idx:
-            control.selected += 1
-            if control.selected == input_row_idx:
-                e.app.layout.focus(input_edit)
-        e.app.invalidate()
-
-    @kb.add("tab")
-    def _tab(e):
-        nonlocal _exiting
-        if _exiting:
-            return
-        if control.selected == input_row_idx:
-            control.selected = 0
-            e.app.layout.focus(control_window)
-        else:
-            control.selected = input_row_idx
-            e.app.layout.focus(input_edit)
-        e.app.invalidate()
-
-    @kb.add("enter")
-    def _enter(e):
-        nonlocal _exiting
-        _exiting = True
-        if control.selected == input_row_idx:
-            text = input_buffer.text.strip()
-            if text:
-                e.app.exit(result=text)
-            else:
-                _exiting = False
-        else:
-            e.app.exit(result=control.opts[control.selected])
-
-    @kb.add("escape")
-    def _esc(e):
-        e.app.exit(result=None)
-
-    @kb.add("c-c")
-    def _cancel(e):
-        e.app.exit(result=None)
-
-    layout = Layout(HSplit([question_window, control_window, input_edit]))
-    app = Application(
-        layout=layout, key_bindings=kb, full_screen=False, erase_when_done=True
-    )
-    result = app.run()
-    if result is not None:
-        console.print(f"[cyan]?[/cyan] {question} [bold]{result}[/bold]")
-    return result
-
-
 async def _checkbox_with_other_async(
     question: str, options: list[str]
 ) -> list[str] | None:
@@ -951,9 +807,13 @@ async def _checkbox_with_other_async(
     )
 
     kb = KeyBindings()
+    _exiting = False
 
     @kb.add("up")
     def _up(e):
+        nonlocal _exiting
+        if _exiting:
+            return
         if control.selected > 0:
             control.selected -= 1
             if control.selected < input_row_idx:
@@ -964,6 +824,9 @@ async def _checkbox_with_other_async(
 
     @kb.add("down")
     def _down(e):
+        nonlocal _exiting
+        if _exiting:
+            return
         if control.selected < input_row_idx:
             control.selected += 1
             if control.selected == input_row_idx:
@@ -972,6 +835,9 @@ async def _checkbox_with_other_async(
 
     @kb.add("tab")
     def _tab(e):
+        nonlocal _exiting
+        if _exiting:
+            return
         if control.selected == input_row_idx:
             control.selected = 0
             e.app.layout.focus(control_window)
@@ -982,25 +848,49 @@ async def _checkbox_with_other_async(
 
     @kb.add(" ")
     def _space(e):
+        nonlocal _exiting
+        if _exiting:
+            return
         if control.selected < input_row_idx:
             control.checked ^= {control.selected}
         e.app.invalidate()
 
     @kb.add("enter")
     def _enter(e):
+        nonlocal _exiting
+        if _exiting:
+            return
+        _exiting = True
         selected_names = [control.opts[i] for i in sorted(control.checked)]
         custom = input_buffer.text.strip()
         if custom:
             selected_names.append(custom)
-        e.app.exit(result=selected_names if selected_names else None)
+        try:
+            e.app.exit(result=selected_names if selected_names else None)
+        except Exception:
+            pass
 
     @kb.add("escape")
     def _esc(e):
-        e.app.exit(result=None)
+        nonlocal _exiting
+        if _exiting:
+            return
+        _exiting = True
+        try:
+            e.app.exit(result=None)
+        except Exception:
+            pass
 
     @kb.add("c-c")
     def _cancel(e):
-        e.app.exit(result=None)
+        nonlocal _exiting
+        if _exiting:
+            return
+        _exiting = True
+        try:
+            e.app.exit(result=None)
+        except Exception:
+            pass
 
     layout = Layout(HSplit([question_window, control_window, input_edit]))
     app = Application(
@@ -1128,23 +1018,45 @@ async def _select_with_other_async(question: str, options: list[str]) -> str | N
     @kb.add("enter")
     def _enter(e):
         nonlocal _exiting
+        if _exiting:
+            return
         _exiting = True
         if control.selected == input_row_idx:
             text = input_buffer.text.strip()
             if text:
-                e.app.exit(result=text)
+                try:
+                    e.app.exit(result=text)
+                except Exception:
+                    pass
             else:
                 _exiting = False
         else:
-            e.app.exit(result=control.opts[control.selected])
+            try:
+                e.app.exit(result=control.opts[control.selected])
+            except Exception:
+                pass
 
     @kb.add("escape")
     def _esc(e):
-        e.app.exit(result=None)
+        nonlocal _exiting
+        if _exiting:
+            return
+        _exiting = True
+        try:
+            e.app.exit(result=None)
+        except Exception:
+            pass
 
     @kb.add("c-c")
     def _cancel(e):
-        e.app.exit(result=None)
+        nonlocal _exiting
+        if _exiting:
+            return
+        _exiting = True
+        try:
+            e.app.exit(result=None)
+        except Exception:
+            pass
 
     layout = Layout(HSplit([question_window, control_window, input_edit]))
     app = Application(

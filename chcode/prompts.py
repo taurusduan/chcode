@@ -50,9 +50,11 @@ async def confirm(message: str, default: bool = True) -> bool:
 
 async def checkbox(message: str, choices: list[str]) -> list[str]:
     """多选框"""
-    from chcode.utils.tools import _checkbox_with_other_async
 
-    return await _checkbox_with_other_async(message, choices) or []
+    def _ask():
+        return questionary.checkbox(message=message, choices=choices).ask()
+
+    return await asyncio.to_thread(_ask) or []
 
 
 async def text(message: str, default: str = "") -> str:

@@ -76,7 +76,7 @@ from chcode.agent_setup import (
 from chcode.skill_manager import manage_skills
 from chcode.utils.git_checker import check_git_availability
 from chcode.utils.git_manager import GitManager
-from chcode.utils.tools import _select_with_other_async
+from chcode.utils.tools import ALL_TOOLS
 
 
 # ─── 命令自动补全 ──────────────────────────────────────
@@ -91,9 +91,7 @@ SLASH_COMMANDS = {
     "/mode": "切换 Common/Yolo 模式",
     "/workdir": "切换工作目录",
     "/tools": "显示内置工具",
-    "/edit": "编辑历史消息",
-    "/fork": "从某条消息创建分支",
-    "/delete": "删除历史消息",
+    "/messages": "管理历史消息（编辑/分叉/删除）",
     "/help": "显示帮助",
     "/quit": "退出",
 }
@@ -395,8 +393,7 @@ class ChatREPL:
         import re
         import shutil
 
-        # 检查是否有编辑缓冲区或中断恢复缓冲区
-        edit_mode = self._edit_buffer is not None
+        # 检查是否有中断恢复缓冲区
         interrupt_mode = self._interrupt_buffer is not None
 
         # 初始化 prompt session（带命令自动补全 + 底部状态栏）
@@ -484,7 +481,7 @@ class ChatREPL:
 
         try:
             # 如果有编辑缓冲区或中断恢复缓冲区，预填充到输入框
-            if edit_mode:
+            if self._edit_buffer is not None:
                 default_text = self._edit_buffer
                 self._edit_buffer = None  # 清除缓冲区
             elif interrupt_mode:
@@ -495,9 +492,7 @@ class ChatREPL:
 
             width = shutil.get_terminal_size().columns
             sep = "\u2500" * width
-            prompt_text = (
-                f"{sep}\n > " if not edit_mode else f"{sep}\n \u270f\ufe0f 编辑模式> "
-            )
+            prompt_text = f"{sep}\n > "
 
             # 使用 prompt-toolkit 获取输入（支持命令自动补全）
             result = await asyncio.to_thread(
@@ -529,9 +524,7 @@ class ChatREPL:
             "/mode": self._cmd_mode,
             "/workdir": self._cmd_workdir,
             "/tools": self._cmd_tools,
-            "/edit": self._cmd_edit,
-            "/fork": self._cmd_fork,
-            "/delete": self._cmd_delete,
+            "/messages": self._cmd_messages,
             "/help": self._cmd_help,
             "/quit": self._cmd_quit,
         }
@@ -814,9 +807,7 @@ class ChatREPL:
             ("/mode", "切换 Common/Yolo 模式"),
             ("/workdir", "切换工作目录"),
             ("/tools", "显示内置工具"),
-            ("/edit", "编辑历史消息"),
-            ("/fork", "从某条消息创建分支"),
-            ("/delete", "删除历史消息"),
+            ("/messages", "管理历史消息（编辑/分叉/删除）"),
             ("/help", "显示此帮助"),
             ("/quit", "退出"),
         ]
@@ -829,8 +820,8 @@ class ChatREPL:
 
     # ─── 消息管理命令 ──────────────────────────────────
 
-    async def _cmd_edit(self, _arg: str) -> None:
-        """编辑历史消息"""
+    async def _cmd_messages(self, _arg: str) -> None:
+        """管理历史消息：编辑、分叉、删除"""
         if not self.agent or not self.session_mgr:
             render_error("Agent 未初始化")
             return
@@ -838,251 +829,210 @@ class ChatREPL:
         state = await self.agent.aget_state(self.session_mgr.config)
         messages: list[BaseMessage] = state.values.get("messages", [])
 
-        # 按轮次分组
         groups = _group_messages_by_turn(messages)
         if not groups:
-            render_warning("没有可编辑的消息")
+            render_warning("没有可管理的消息")
             return
 
-        # 构建选项列表
-        options = []
-        for idx, group in enumerate(groups):
-            display = _get_group_display(group)
-            options.append(f"[{idx + 1}] {display}")
-
-        # 用户选择
-        chosen = await select("选择要编辑的消息组:", options)
-        if not chosen:
-            return
-
-        # 解析选择
-        try:
-            sel_idx = int(chosen.split("]")[0].replace("[", "")) - 1
-            if sel_idx < 0 or sel_idx >= len(groups):
-                render_error("无效的选择")
+        while True:
+            # 第一步：选择操作类型
+            action = await select(
+                "选择操作:", ["编辑消息", "分叉消息", "删除消息"]
+            )
+            if not action:
                 return
-        except (ValueError, IndexError):
-            render_error("无效的选择")
-            return
 
-        target_group = groups[sel_idx]
-        edit_msg = None
-        for msg in target_group:
-            if msg.type == "human":
-                edit_msg = msg
-                break
+            # 构建选项列表（带返回选项）
+            options = []
+            for idx, group in enumerate(groups):
+                display = _get_group_display(group)
+                options.append(f"[{idx + 1}] {display}")
 
-        if not edit_msg:
-            render_warning("该组没有 HumanMessage")
-            return
+            if action == "删除消息":
+                # 多选
+                chosen_list = await checkbox(
+                    "选择要删除的消息组（空格选择，回车确认）:", options
+                )
+                if not chosen_list:
+                    continue  # 返回操作选择
 
-        # 确认
-        ok = await confirm(
-            f"确定编辑此消息组？编辑后将删除此消息组之后的所有内容。", default=False
-        )
-        if not ok:
-            return
+                ok = await confirm(
+                    f"确定删除 {len(chosen_list)} 个消息组？", default=False
+                )
+                if not ok:
+                    continue
 
-        # 收集要删除的消息 ID（从目标组开始）
-        no_need_ids, all_ids = _collect_ids_from_group(sel_idx, groups, mode="edit")
+                delete_ids = []
+                for chosen in chosen_list:
+                    try:
+                        sel_idx = (
+                            int(chosen.split("]")[0].replace("[", "")) - 1
+                        )
+                        if 0 <= sel_idx < len(groups):
+                            delete_ids.extend(
+                                [m.id for m in groups[sel_idx]]
+                            )
+                    except (ValueError, IndexError):
+                        continue
 
-        # Git rollback
-        if self.git and self.git_manager:
-            try:
-                await asyncio.to_thread(self.git_manager.rollback, no_need_ids, all_ids)
-            except Exception as e:
-                render_warning(f"Git 回滚失败: {e}")
+                if not delete_ids:
+                    render_error("没有有效的选择")
+                    continue
 
-        # 删除消息
-        await self._delete_messages(no_need_ids)
-
-        # 将内容填入输入框
-        self._edit_buffer = edit_msg.content
-        render_success("消息已加载到输入框，修改后发送即可重新生成")
-
-    async def _cmd_fork(self, _arg: str) -> None:
-        """从某条消息创建分支"""
-        if not self.agent or not self.session_mgr:
-            render_error("Agent 未初始化")
-            return
-
-        state = await self.agent.aget_state(self.session_mgr.config)
-        messages: list[BaseMessage] = state.values.get("messages", [])
-
-        # 按轮次分组
-        groups = _group_messages_by_turn(messages)
-        if not groups:
-            render_warning("没有可 Fork 的消息")
-            return
-
-        # 构建选项列表
-        options = []
-        for idx, group in enumerate(groups):
-            display = _get_group_display(group)
-            options.append(f"[{idx + 1}] {display}")
-
-        # 用户选择 Fork 点
-        chosen = await _select_with_other_async(
-            "选择 Fork 点（此消息组将保留在分支中）:", options
-        )
-        if not chosen:
-            return
-
-        # 解析选择
-        try:
-            sel_idx = int(chosen.split("]")[0].replace("[", "")) - 1
-            if sel_idx < 0 or sel_idx >= len(groups):
-                render_error("无效的选择")
+                await self._delete_messages(delete_ids)
+                render_success(f"已删除 {len(chosen_list)} 个消息组")
                 return
-        except (ValueError, IndexError):
-            render_error("无效的选择")
-            return
 
-        fork_group = groups[sel_idx]
+            # 编辑 / 分叉：单选一条消息组
+            if action == "编辑消息":
+                hint = "选择要编辑的消息组（编辑后将删除此消息组之后的所有内容）:"
+            else:
+                hint = "选择 Fork 点（此消息组将保留在分支中）:"
 
-        # 确认
-        ok = await confirm(f"确定从第 {sel_idx + 1} 条消息组创建分支？", default=True)
-        if not ok:
-            return
-
-        # 收集要删除的消息 ID（只删除 Fork 点之后的组，保留 Fork 组）
-        no_need_ids, all_ids = _collect_ids_from_group(sel_idx, groups, mode="fork")
-
-        # 选择新工作目录
-        saved = load_workplace()
-        if saved:
-            choices = [str(saved), "自定义路径..."]
-        else:
-            choices = ["自定义路径..."]
-
-        new_path_str = await select_or_custom("选择新工作目录:", choices)
-        if not new_path_str:
-            return
-
-        new_path = Path(new_path_str)
-        if not new_path.exists():
-            render_error("路径不存在")
-            return
-
-        # 保存旧路径
-        old_path = self.workplace_path
-
-        # 设置新工作目录
-        self.workplace_path = new_path
-        os.chdir(self.workplace_path)
-        save_workplace(self.workplace_path)
-
-        # 创建子目录
-        chat_dir = self.workplace_path / ".chat"
-        chat_dir.mkdir(exist_ok=True)
-        (chat_dir / "sessions").mkdir(exist_ok=True)
-        (chat_dir / "skills").mkdir(exist_ok=True)
-
-        # 复制旧工作目录文件（如果不同）
-        if old_path != new_path:
-            render_info("复制工作目录文件...")
-            try:
-                await asyncio.to_thread(self._copy_dir, old_path, new_path)
-                # 删除 sessions 目录（使用新的 checkpointer）
-                sessions_path = self.workplace_path / ".chat" / "sessions"
-                if sessions_path.exists():
-                    import shutil
-
-                    await asyncio.to_thread(shutil.rmtree, sessions_path)
-                    sessions_path.mkdir(exist_ok=True)
-            except Exception as e:
-                render_warning(f"复制文件失败: {e}")
-
-        # 重新初始化会话管理和 checkpointer
-        self.session_mgr = SessionManager(self.workplace_path)
-        db_path = self.workplace_path / ".chat" / "sessions" / "checkpointer.db"
-        self.checkpointer = await create_checkpointer(db_path)
-
-        # 重建 agent
-        self.agent = await asyncio.to_thread(
-            build_agent,
-            self.model_config,
-            self.checkpointer,
-            None,
-            self.yolo,
-        )
-
-        # 保留 Fork 点及之前的所有消息
-        need_messages = []
-        for i, group in enumerate(groups):
-            need_messages.extend(group)
-            if i == sel_idx:
-                break
-
-        # 更新状态
-        await self.agent.aupdate_state(
-            self.session_mgr.config,
-            {"messages": need_messages},
-        )
-
-        # Git rollback（如果启用）
-        if self.git and self.git_manager:
-            try:
-                await asyncio.to_thread(self.git_manager.rollback, no_need_ids, all_ids)
-            except Exception:
-                pass
-
-        # 重新初始化 Git
-        await self._init_git()
-
-        render_success(f"分支已创建！工作目录: {self.workplace_path}")
-        self._render_status_bar()
-
-    async def _cmd_delete(self, _arg: str) -> None:
-        """删除历史消息"""
-        if not self.agent or not self.session_mgr:
-            render_error("Agent 未初始化")
-            return
-
-        state = await self.agent.aget_state(self.session_mgr.config)
-        messages: list[BaseMessage] = state.values.get("messages", [])
-
-        # 按轮次分组
-        groups = _group_messages_by_turn(messages)
-        if not groups:
-            render_warning("没有可删除的消息")
-            return
-
-        # 构建选项列表
-        options = []
-        for idx, group in enumerate(groups):
-            display = _get_group_display(group)
-            options.append(f"[{idx + 1}] {display}")
-
-        # 多选
-        chosen_list = await checkbox(
-            "选择要删除的消息组（空格选择，回车确认）:", options
-        )
-        if not chosen_list:
-            return
-
-        # 确认
-        ok = await confirm(f"确定删除 {len(chosen_list)} 个消息组？", default=False)
-        if not ok:
-            return
-
-        # 解析选择并收集要删除的消息 ID
-        delete_ids = []
-        for chosen in chosen_list:
-            try:
-                sel_idx = int(chosen.split("]")[0].replace("[", "")) - 1
-                if 0 <= sel_idx < len(groups):
-                    delete_ids.extend([m.id for m in groups[sel_idx]])
-            except (ValueError, IndexError):
+            select_options = options + ["返回"]
+            chosen = await select(hint, select_options)
+            if not chosen:
+                return
+            if chosen == "返回":
                 continue
 
-        if not delete_ids:
-            render_error("没有有效的选择")
-            return
+            # 解析选择
+            try:
+                sel_idx = int(chosen.split("]")[0].replace("[", "")) - 1
+                if sel_idx < 0 or sel_idx >= len(groups):
+                    render_error("无效的选择")
+                    continue
+            except (ValueError, IndexError):
+                render_error("无效的选择")
+                continue
 
-        # 删除消息
-        await self._delete_messages(delete_ids)
-        render_success(f"已删除 {len(chosen_list)} 个消息组")
+            if action == "编辑消息":
+                target_group = groups[sel_idx]
+                edit_msg = None
+                for msg in target_group:
+                    if msg.type == "human":
+                        edit_msg = msg
+                        break
+
+                if not edit_msg:
+                    render_warning("该组没有 HumanMessage")
+                    continue
+
+                ok = await confirm(
+                    f"确定编辑此消息组？编辑后将删除此消息组之后的所有内容。",
+                    default=False,
+                )
+                if not ok:
+                    continue
+
+                no_need_ids, all_ids = _collect_ids_from_group(
+                    sel_idx, groups, mode="edit"
+                )
+
+                if self.git and self.git_manager:
+                    try:
+                        await asyncio.to_thread(
+                            self.git_manager.rollback, no_need_ids, all_ids
+                        )
+                    except Exception as e:
+                        render_warning(f"Git 回滚失败: {e}")
+
+                await self._delete_messages(no_need_ids)
+
+                self._edit_buffer = edit_msg.content
+                render_success("消息已加载到输入框，修改后发送即可重新生成")
+
+            elif action == "分叉消息":
+                ok = await confirm(
+                    f"确定从第 {sel_idx + 1} 条消息组创建分支？", default=True
+                )
+                if not ok:
+                    continue
+
+                no_need_ids, all_ids = _collect_ids_from_group(
+                    sel_idx, groups, mode="fork"
+                )
+
+                saved = load_workplace()
+                if saved:
+                    choices = [str(saved), "自定义路径..."]
+                else:
+                    choices = ["自定义路径..."]
+
+                new_path_str = await select_or_custom("选择新工作目录:", choices)
+                if not new_path_str:
+                    continue
+
+                new_path = Path(new_path_str)
+                if not new_path.exists():
+                    render_error("路径不存在")
+                    continue
+
+                old_path = self.workplace_path
+
+                self.workplace_path = new_path
+                os.chdir(self.workplace_path)
+                save_workplace(self.workplace_path)
+
+                chat_dir = self.workplace_path / ".chat"
+                chat_dir.mkdir(exist_ok=True)
+                (chat_dir / "sessions").mkdir(exist_ok=True)
+                (chat_dir / "skills").mkdir(exist_ok=True)
+
+                if old_path != new_path:
+                    render_info("复制工作目录文件...")
+                    try:
+                        await asyncio.to_thread(
+                            self._copy_dir, old_path, new_path
+                        )
+                        sessions_path = self.workplace_path / ".chat" / "sessions"
+                        if sessions_path.exists():
+                            import shutil
+
+                            await asyncio.to_thread(
+                                shutil.rmtree, sessions_path
+                            )
+                            sessions_path.mkdir(exist_ok=True)
+                    except Exception as e:
+                        render_warning(f"复制文件失败: {e}")
+
+                self.session_mgr = SessionManager(self.workplace_path)
+                db_path = (
+                    self.workplace_path / ".chat" / "sessions" / "checkpointer.db"
+                )
+                self.checkpointer = await create_checkpointer(db_path)
+
+                self.agent = await asyncio.to_thread(
+                    build_agent,
+                    self.model_config,
+                    self.checkpointer,
+                    None,
+                    self.yolo,
+                )
+
+                need_messages = []
+                for i, group in enumerate(groups):
+                    need_messages.extend(group)
+                    if i == sel_idx:
+                        break
+
+                await self.agent.aupdate_state(
+                    self.session_mgr.config,
+                    {"messages": need_messages},
+                )
+
+                if self.git and self.git_manager:
+                    try:
+                        await asyncio.to_thread(
+                            self.git_manager.rollback, no_need_ids, all_ids
+                        )
+                    except Exception:
+                        pass
+
+                await self._init_git()
+
+                render_success(f"分支已创建！工作目录: {self.workplace_path}")
+                self._render_status_bar()
 
     async def _delete_messages(self, message_ids: list[str]) -> None:
         """删除指定消息"""
