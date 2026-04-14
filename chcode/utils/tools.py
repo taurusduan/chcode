@@ -11,10 +11,8 @@ ToolRuntime 提供访问运行时信息的统一接口：
 - context: 不可变的配置（如 skill_loader）
 """
 
-import locale
 import os
-import shutil
-import subprocess
+import platform
 import re
 import time
 from pathlib import Path
@@ -23,13 +21,17 @@ from urllib.parse import urlparse
 
 import httpx
 from langchain.tools import tool, ToolRuntime
-from charset_normalizer import from_bytes
 from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.text import Text
 from chcode.display import render_tool_call
 
-from chcode.utils.enhanced_chat_openai import EnhancedChatOpenAI
+from chcode.utils.shell import (
+    BashProvider,
+    PowerShellProvider,
+    ShellSession,
+    interpret_command_result,
+)
 from chcode.utils.skill_loader import SkillAgentContext
 from tavily import TavilyClient
 
@@ -118,123 +120,112 @@ uv run {scripts_dir}/script_name.py [args]
 """
 
 
-def _find_git_bash() -> str:
-    """通过环境变量 PATH 查找 Git Bash (bash.exe)"""
-    # 优先通过 git.exe 所在目录推导 bash.exe，避免命中 WSL 的 bash
-    git_path = shutil.which("git")
-    if git_path:
-        git_bin = os.path.dirname(git_path)
-        bash_candidate = os.path.join(git_bin, "bash.exe")
-        if os.path.isfile(bash_candidate):
-            return bash_candidate
-        # cmd 子目录下也可能有
-        bash_candidate = os.path.join(git_bin, "..", "bin", "bash.exe")
-        if os.path.isfile(bash_candidate):
-            return os.path.normpath(bash_candidate)
-
-    # 最后兜底：PATH 中查找 bash.exe
-    bash_path = shutil.which("bash")
-    if bash_path and os.path.isfile(bash_path):
-        return bash_path
-
-    return "bash"
-
-
-def _get_shell_command(platform: str, command: str):
-    if platform == "Windows":
-        git_bash = _find_git_bash()
-        return git_bash, ["-c", command]
+def _create_shell_session(workdir: str) -> ShellSession:
+    is_windows = platform.system() == "Windows"
+    if is_windows:
+        bash_provider = BashProvider()
+        if bash_provider.is_available:
+            session = ShellSession(bash_provider)
+            session.cwd = workdir
+            return session
+        ps_provider = PowerShellProvider()
+        if ps_provider.is_available:
+            session = ShellSession(ps_provider)
+            session.cwd = workdir
+            return session
     else:
-        return "/bin/sh", ["-c", command]
+        bash_provider = BashProvider()
+        if bash_provider.is_available:
+            session = ShellSession(bash_provider)
+            session.cwd = workdir
+            return session
+
+    return None
+
+
+_shell_sessions: dict[str, ShellSession] = {}
+
+
+def _get_shell_session(workdir: str) -> ShellSession:
+    key = workdir
+    session = _shell_sessions.get(key)
+    if session is not None:
+        return session
+    session = _create_shell_session(workdir)
+    if session is not None:
+        _shell_sessions[key] = session
+        return session
+    return None
 
 
 @tool
 def bash(
     command: str,
-    platform: Literal["Windows", "Linux", "Mac"],
     runtime: ToolRuntime[SkillAgentContext],
+    timeout: int = 300,
+    workdir: str | None = None,
 ) -> str:
     """
-    Execute a shell command with robust multi-encoding output handling.
+    Execute a shell command with automatic platform detection and CWD tracking.
 
-    Uses Git Bash on Windows, sh on Linux/Mac.
+    On Windows: uses Git Bash if available, falls back to PowerShell.
+    On Linux/Mac: uses the system shell (bash/zsh).
+
+    The working directory is tracked across commands within the same session.
+    Use 'workdir' to override the working directory for a specific command
+    without affecting the session's tracked CWD.
+
+    Output is automatically truncated if it exceeds 2000 lines or 51200 bytes.
+    Certain exit codes are interpreted semantically (e.g., grep exit 1 = no matches).
+
+    Args:
+        command: The shell command to execute
+        timeout: Timeout in seconds (default 300, max 600)
+        workdir: Working directory override (default: project root)
     """
     cwd = str(runtime.context.working_directory)
     render_tool_call("bash", command)
-    system_encoding = locale.getpreferredencoding() or "utf-8"
 
-    def robust_decode(data: bytes) -> str:
-        if not data:
-            return ""
-        if len(data) >= 4:
-            bom = data[:4]
-            if bom[:3] == b"\xef\xbb\xbf":
-                return data[3:].decode("utf-8", errors="replace")
-            if bom[:2] in (b"\xff\xfe", b"\xfe\xff"):
-                return data.decode("utf-16", errors="replace")
-        result = from_bytes(data)
-        best = result.best() if result else None
-        if best and best.coherence > 0.5:
-            return str(best)
-        for enc in ["utf-8", "gb18030", system_encoding, "latin-1"]:
-            try:
-                return data.decode(enc, errors="strict")
-            except (UnicodeDecodeError, LookupError):
-                continue
-        return data.decode(system_encoding, errors="replace")
+    timeout = min(timeout, 600)
+    timeout_ms = timeout * 1000
 
-    try:
-        shell_exec, shell_args = _get_shell_command(platform, command)
+    session = _get_shell_session(cwd)
+    if session is None:
+        return "bash:\n[FAILED] No shell available on this system"
 
-        proc = subprocess.run(
-            [shell_exec] + shell_args,
-            cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=300,
-        )
+    exec_workdir = workdir if workdir else None
+    result, truncated = session.execute(command, timeout=timeout_ms, workdir=exec_workdir)
 
-        stdout_decoded = robust_decode(proc.stdout)
-        stderr_decoded = robust_decode(proc.stderr)
+    interpretation = interpret_command_result(command, result.exit_code)
 
-        parts = []
-        if proc.returncode == 0:
-            parts.append(f"[OK] {command} 执行成功")
-        else:
-            parts.append(f"[FAILED] Exit code: {proc.returncode}")
+    parts = []
+    if result.exit_code == 0:
+        parts.append(f"[OK] ({session.provider_name})")
+    elif interpretation.message and not interpretation.is_error:
+        parts.append(f"[OK] ({session.provider_name}) {interpretation.message}")
+    else:
+        parts.append(f"[FAILED] Exit code: {result.exit_code} ({session.provider_name})")
+    parts.append("")
+
+    output = truncated.content if truncated.truncated else result.stdout
+    if output and output.strip():
+        parts.append(output.rstrip())
+
+    if result.stderr and result.stderr.strip():
+        if output and output.strip():
+            parts.append("")
+        parts.append("--- stderr ---")
+        parts.append(result.stderr.rstrip())
+
+    if result.timed_out:
         parts.append("")
+        parts.append(f"Command timed out after {timeout}s")
 
-        if stdout_decoded.strip():
-            parts.append(stdout_decoded.rstrip())
-
-        if stderr_decoded.strip():
-            if stdout_decoded.strip():
-                parts.append("")
-            parts.append("--- stderr ---")
-            parts.append(stderr_decoded.rstrip())
-
-        if not stdout_decoded.strip() and not stderr_decoded.strip():
+    if not output or not output.strip():
+        if not result.stderr or not result.stderr.strip():
             parts.append("(no output)")
 
-        return "bash:\n" + "\n".join(parts)
-
-    except subprocess.TimeoutExpired as e:
-        stdout_partial = robust_decode(e.stdout) if e.stdout else ""
-        stderr_partial = robust_decode(e.stderr) if e.stderr else ""
-        msg = ["bash:\n[FAILED] Command timed out after 300 seconds."]
-        if stdout_partial or stderr_partial:
-            msg.append("Partial output captured:")
-            if stdout_partial:
-                msg.append(stdout_partial.rstrip())
-            if stderr_partial:
-                if stdout_partial:
-                    msg.append("")
-                msg.append("--- stderr (partial) ---")
-                msg.append(stderr_partial.rstrip())
-        return "\n".join(msg)
-
-    except Exception as e:
-        return f"bash:\n[FAILED] Execution error: {str(e)}"
+    return "bash:\n" + "\n".join(parts)
 
 
 @tool
@@ -282,9 +273,7 @@ def read_file(file_path: str, runtime: ToolRuntime[SkillAgentContext]) -> str:
 
 
 @tool
-def write_file(
-    file_path: str, content: str, runtime: ToolRuntime[SkillAgentContext]
-) -> str:
+def write_file(file_path: str, content: str, runtime: ToolRuntime[SkillAgentContext]) -> str:
     """
     Write content to a file.
 
@@ -394,8 +383,7 @@ def grep(pattern: str, path: str, runtime: ToolRuntime[SkillAgentContext]) -> st
                     parts = p.parts
                     if any(
                         part.startswith(".")
-                        or part
-                        in ("node_modules", "__pycache__", ".git", "venv", ".venv")
+                        or part in ("node_modules", "__pycache__", ".git", "venv", ".venv")
                         for part in parts
                     ):
                         continue
@@ -475,7 +463,7 @@ def edit(
         count = content.count(old_string)
 
         if count == 0:
-            return f"edit:\n[FAILED] String not found in file. Make sure the text matches exactly including whitespace."
+            return "edit:\n[FAILED] String not found in file. Make sure the text matches exactly including whitespace."
 
         if count > 1:
             return f"edit:\n[FAILED] String appears {count} times in file. Please provide more context to make it unique."
@@ -517,9 +505,7 @@ def list_dir(path: str, runtime: ToolRuntime[SkillAgentContext]) -> str:
         return f"ls:\n[FAILED] Not a directory: {path}"
 
     try:
-        entries = sorted(
-            dir_path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
-        )
+        entries = sorted(dir_path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
 
         result_lines = []
         for entry in entries[:100]:  # 限制数量
@@ -577,12 +563,8 @@ def _html_to_markdown(html: str) -> str:
 
         return md(html)
     except ImportError:
-        text = re.sub(
-            r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE
-        )
-        text = re.sub(
-            r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE
-        )
+        text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r"<[^>]+>", " ", text)
         text = re.sub(r"\s+", " ", text).strip()
         return text
@@ -666,8 +648,7 @@ def web_fetch(url: str) -> dict:
 
         if len(markdown_content) > MAX_MARKDOWN_LENGTH:
             markdown_content = (
-                markdown_content[:MAX_MARKDOWN_LENGTH]
-                + "\n\n[Content truncated due to length...]"
+                markdown_content[:MAX_MARKDOWN_LENGTH] + "\n\n[Content truncated due to length...]"
             )
 
         result = f"Content from {url}:\n\n{markdown_content}\n\n---"
@@ -712,9 +693,7 @@ def web_fetch(url: str) -> dict:
         }
 
 
-async def _checkbox_with_other_async(
-    question: str, options: list[str]
-) -> list[str] | None:
+async def _checkbox_with_other_async(question: str, options: list[str]) -> list[str] | None:
     """
     多选 + 自定义输入框（异步版本）
 
@@ -747,9 +726,7 @@ async def _checkbox_with_other_async(
         def get_invalidate_events(self):
             yield input_buffer.on_text_changed
 
-        def preferred_height(
-            self, width, max_available_height, wrap_lines, get_line_prefix
-        ):
+        def preferred_height(self, width, max_available_height, wrap_lines, get_line_prefix):
             return len(self.opts) + 1
 
         def create_content(self, width: int, height: int) -> UIContent:
@@ -878,9 +855,7 @@ async def _checkbox_with_other_async(
             pass
 
     layout = Layout(HSplit([question_window, control_window, input_edit]))
-    app = Application(
-        layout=layout, key_bindings=kb, full_screen=False, erase_when_done=True
-    )
+    app = Application(layout=layout, key_bindings=kb, full_screen=False, erase_when_done=True)
     result = await app.run_async()
     if result is not None:
         console.print(f"[cyan]?[/cyan] {question} [bold]{', '.join(result)}[/bold]")
@@ -917,9 +892,7 @@ async def _select_with_other_async(question: str, options: list[str]) -> str | N
         def get_invalidate_events(self):
             yield input_buffer.on_text_changed
 
-        def preferred_height(
-            self, width, max_available_height, wrap_lines, get_line_prefix
-        ):
+        def preferred_height(self, width, max_available_height, wrap_lines, get_line_prefix):
             return len(self.opts) + 1
 
         def create_content(self, width: int, height: int) -> UIContent:
@@ -1044,9 +1017,7 @@ async def _select_with_other_async(question: str, options: list[str]) -> str | N
             pass
 
     layout = Layout(HSplit([question_window, control_window, input_edit]))
-    app = Application(
-        layout=layout, key_bindings=kb, full_screen=False, erase_when_done=True
-    )
+    app = Application(layout=layout, key_bindings=kb, full_screen=False, erase_when_done=True)
     result = await app.run_async()
     if result is not None:
         console.print(f"[cyan]?[/cyan] {question} [bold]{result}[/bold]")
@@ -1248,9 +1219,7 @@ async def agent(
             _display._subagent_parallel = True
             _display._start_progress()
             if _display._progress_task is None or _display._progress_task.done():
-                _display._progress_task = asyncio.ensure_future(
-                    _display._progress_updater()
-                )
+                _display._progress_task = asyncio.ensure_future(_display._progress_updater())
 
     try:
         result = await run_subagent(
@@ -1294,7 +1263,6 @@ async def agent(
 # ---------------------------------------------------------------------------
 
 import json
-from pydantic import BaseModel, Field
 
 
 class TodoItem(BaseModel):
@@ -1411,7 +1379,12 @@ Args:
             status = t.get("status", "pending")
             content = t.get("content", "")
             priority = t.get("priority", "medium")
-            marker_map = {"completed": "[x]", "in_progress": "[>]", "cancelled": "[-]", "pending": "[ ]"}
+            marker_map = {
+                "completed": "[x]",
+                "in_progress": "[>]",
+                "cancelled": "[-]",
+                "pending": "[ ]",
+            }
             marker = marker_map.get(status, "[ ]")
             ps = {"high": "red bold", "medium": "yellow", "low": "dim"}.get(priority, "")
             line = Text(f"    {marker} {content} ")
