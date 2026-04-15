@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -22,8 +23,12 @@ _RULES: list[tuple[list[str], dict[int, str]]] = [
 
 
 def _get_base_command(command: str) -> str:
-    first_part = command.strip().split("|")[0].split(";")[0].split("&&")[0]
-    tokens = first_part.strip().split()
+    segments = re.split(r"[|;&]", command)
+    last = segments[-1].strip()
+    for op in ["&&", "||"]:
+        parts = last.split(op)
+        last = parts[-1].strip()
+    tokens = last.split()
     if not tokens:
         return ""
     base = tokens[0]

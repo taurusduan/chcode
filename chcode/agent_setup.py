@@ -56,6 +56,7 @@ INNER_MODEL_CONFIG = {
 
 # ─── 中间件 ──────────────────────────────────────────
 
+
 @wrap_tool_call
 async def handle_tool_errors(
     request: ToolCallRequest, handler: Callable[[ToolCallRequest], Command]
@@ -126,7 +127,10 @@ async def tool_result_budget(
         if isinstance(msg, ToolMessage) and msg.content:
             cleaned = clean_tool_output(msg.content)
             truncated = truncate_large_result(
-                cleaned, msg.name or "", msg.tool_call_id, workplace=workplace,
+                cleaned,
+                msg.name or "",
+                msg.tool_call_id,
+                workplace=workplace,
             )
             messages[i] = msg.model_copy(update={"content": truncated})
     messages = enforce_per_turn_budget(messages, budget=200_000, workplace=workplace)
@@ -135,11 +139,34 @@ async def tool_result_budget(
 
 # ─── Agent 构建 ──────────────────────────────────────────
 
+
 class AsyncHITL(HumanInTheLoopMiddleware):
     """异步 HITL 中间件 — 审批在 chat loop 中处理"""
 
     async def awrap_model_call(self, request, handler):
         return await handler(request)
+
+
+_hitl_middleware: AsyncHITL | None = None
+_summarization_model: EnhancedChatOpenAI | None = None
+
+
+def _build_interrupt_on(yolo: bool) -> dict:
+    return (
+        {}
+        if yolo
+        else {
+            "bash": {"allowed_decisions": ["approve", "reject"]},
+            "edit": {"allowed_decisions": ["approve", "reject"]},
+            "write_file": {"allowed_decisions": ["approve", "reject"]},
+        }
+    )
+
+
+def _dummy_model():
+    from langchain_openai import ChatOpenAI
+
+    return ChatOpenAI(model="placeholder", api_key="sk-placeholder", max_retries=0)
 
 
 def build_agent(
@@ -149,18 +176,13 @@ def build_agent(
     yolo: bool = False,
 ) -> object:
     """构建 agent 实例"""
-    cfg = model_config or INNER_MODEL_CONFIG
-    model = EnhancedChatOpenAI(**cfg)
+    global _hitl_middleware, _summarization_model
 
-    interrupt_on = (
-        {}
-        if yolo
-        else {
-            "bash": {"allowed_decisions": ["approve", "reject"]},
-            "edit": {"allowed_decisions": ["approve", "reject"]},
-            "write_file": {"allowed_decisions": ["approve", "reject"]},
-        }
-    )
+    cfg = model_config or INNER_MODEL_CONFIG
+    model = _dummy_model()
+
+    _hitl_middleware = AsyncHITL(interrupt_on=_build_interrupt_on(yolo))
+    _summarization_model = EnhancedChatOpenAI(**cfg)
 
     agent = create_agent(
         model,
@@ -182,16 +204,34 @@ def build_agent(
                 ]
             ),
             SummarizationMiddleware(
-                model=EnhancedChatOpenAI(**cfg),
+                model=_summarization_model,
                 trigger=("tokens", 170_000),
                 keep=("messages", 20),
             ),
-            AsyncHITL(interrupt_on=interrupt_on),
+            _hitl_middleware,
         ],
         context_schema=SkillAgentContext,
         checkpointer=checkpointer,
     )
     return agent
+
+
+def update_hitl_config(yolo: bool) -> None:
+    """运行时更新 HITL interrupt_on 配置，无需重建 agent"""
+    if _hitl_middleware is not None:
+        _hitl_middleware.interrupt_on = _build_interrupt_on(yolo)
+
+
+def update_summarization_model(model_config: dict) -> None:
+    """运行时更新 SummarizationMiddleware 的模型"""
+    if _summarization_model is not None:
+        new_model = EnhancedChatOpenAI(**model_config)
+        for key in _summarization_model.model_fields_set:
+            try:
+                if key in new_model.__dict__:
+                    setattr(_summarization_model, key, new_model.__dict__[key])
+            except (AttributeError, TypeError):
+                pass
 
 
 async def create_checkpointer(db_path: Path) -> AsyncSqliteSaver:
@@ -203,4 +243,5 @@ async def create_checkpointer(db_path: Path) -> AsyncSqliteSaver:
 def _get_all_tools() -> list:
     """获取所有工具（延迟导入避免循环依赖）"""
     from chcode.utils.tools import ALL_TOOLS
+
     return ALL_TOOLS

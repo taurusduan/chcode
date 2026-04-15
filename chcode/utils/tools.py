@@ -194,7 +194,9 @@ def bash(
         return "bash:\n[FAILED] No shell available on this system"
 
     exec_workdir = workdir if workdir else None
-    result, truncated = session.execute(command, timeout=timeout_ms, workdir=exec_workdir)
+    result, truncated = session.execute(
+        command, timeout=timeout_ms, workdir=exec_workdir
+    )
 
     interpretation = interpret_command_result(command, result.exit_code)
 
@@ -204,7 +206,9 @@ def bash(
     elif interpretation.message and not interpretation.is_error:
         parts.append(f"[OK] ({session.provider_name}) {interpretation.message}")
     else:
-        parts.append(f"[FAILED] Exit code: {result.exit_code} ({session.provider_name})")
+        parts.append(
+            f"[FAILED] Exit code: {result.exit_code} ({session.provider_name})"
+        )
     parts.append("")
 
     output = truncated.content if truncated.truncated else result.stdout
@@ -273,7 +277,9 @@ def read_file(file_path: str, runtime: ToolRuntime[SkillAgentContext]) -> str:
 
 
 @tool
-def write_file(file_path: str, content: str, runtime: ToolRuntime[SkillAgentContext]) -> str:
+def write_file(
+    file_path: str, content: str, runtime: ToolRuntime[SkillAgentContext]
+) -> str:
     """
     Write content to a file.
 
@@ -344,6 +350,82 @@ def glob(pattern: str, runtime: ToolRuntime[SkillAgentContext]) -> str:
         return f"glob:\n[FAILED] {str(e)}"
 
 
+_GREP_EXCLUDED_DIRS = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".tox",
+        "dist",
+        "build",
+        ".idea",
+        ".vscode",
+        ".cache",
+        ".sass-cache",
+        "target",
+        "Pods",
+    }
+)
+_GREP_BINARY_EXT = frozenset(
+    {
+        ".exe",
+        ".dll",
+        ".so",
+        ".dylib",
+        ".bin",
+        ".obj",
+        ".o",
+        ".a",
+        ".lib",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".bmp",
+        ".ico",
+        ".webp",
+        ".mp3",
+        ".mp4",
+        ".avi",
+        ".mov",
+        ".mkv",
+        ".wav",
+        ".flac",
+        ".zip",
+        ".tar",
+        ".gz",
+        ".bz2",
+        ".xz",
+        ".7z",
+        ".rar",
+        ".pdf",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".ppt",
+        ".pptx",
+        ".pyc",
+        ".pyo",
+        ".class",
+        ".jar",
+        ".war",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".eot",
+        ".otf",
+        ".sqlite",
+        ".db",
+    }
+)
+_GREP_MAX_FILE_SIZE = 1 * 1024 * 1024
+
+
 @tool
 def grep(pattern: str, path: str, runtime: ToolRuntime[SkillAgentContext]) -> str:
     """
@@ -371,46 +453,51 @@ def grep(pattern: str, path: str, runtime: ToolRuntime[SkillAgentContext]) -> st
     max_results = 50
     files_searched = 0
 
+    def _search_file(file_path: Path) -> None:
+        nonlocal files_searched
+        try:
+            size = file_path.stat().st_size
+            if size > _GREP_MAX_FILE_SIZE:
+                return
+        except OSError:
+            return
+
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="ignore")
+            lines = content.split("\n")
+            files_searched += 1
+
+            for line_num, line in enumerate(lines, 1):
+                if regex.search(line):
+                    try:
+                        rel_path = file_path.relative_to(cwd)
+                    except ValueError:
+                        rel_path = file_path
+                    results.append(f"{rel_path}:{line_num}: {line.strip()[:100]}")
+
+                    if len(results) >= max_results:
+                        return
+        except (PermissionError, IsADirectoryError):
+            pass
+
     try:
         if search_path.is_file():
-            files = [search_path]
+            _search_file(search_path)
         else:
-            # 搜索所有文本文件，排除常见的二进制/隐藏目录
-            files = []
             for p in search_path.rglob("*"):
-                if p.is_file():
-                    # 排除隐藏文件和常见的非代码目录
-                    parts = p.parts
-                    if any(
-                        part.startswith(".")
-                        or part in ("node_modules", "__pycache__", ".git", "venv", ".venv")
-                        for part in parts
-                    ):
-                        continue
-                    files.append(p)
-
-        for file_path in files:
-            if len(results) >= max_results:
-                break
-
-            try:
-                content = file_path.read_text(encoding="utf-8", errors="ignore")
-                lines = content.split("\n")
-                files_searched += 1
-
-                for line_num, line in enumerate(lines, 1):
-                    if regex.search(line):
-                        try:
-                            rel_path = file_path.relative_to(cwd)
-                        except ValueError:
-                            rel_path = file_path
-                        results.append(f"{rel_path}:{line_num}: {line.strip()[:100]}")
-
-                        if len(results) >= max_results:
-                            break
-
-            except (UnicodeDecodeError, PermissionError, IsADirectoryError):
-                continue
+                if len(results) >= max_results:
+                    break
+                if not p.is_file():
+                    continue
+                parts = p.parts
+                if any(
+                    part.startswith(".") or part in _GREP_EXCLUDED_DIRS
+                    for part in parts
+                ):
+                    continue
+                if p.suffix.lower() in _GREP_BINARY_EXT:
+                    continue
+                _search_file(p)
 
         if not results:
             return f"grep:\n[FAILED] No matches found for pattern: {pattern} (searched {files_searched} files)"
@@ -505,7 +592,9 @@ def list_dir(path: str, runtime: ToolRuntime[SkillAgentContext]) -> str:
         return f"ls:\n[FAILED] Not a directory: {path}"
 
     try:
-        entries = sorted(dir_path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+        entries = sorted(
+            dir_path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
+        )
 
         result_lines = []
         for entry in entries[:100]:  # 限制数量
@@ -534,7 +623,7 @@ def list_dir(path: str, runtime: ToolRuntime[SkillAgentContext]) -> str:
 
 
 @tool
-def web_search(
+async def web_search(
     query: str,
     runtime: ToolRuntime[SkillAgentContext],
     max_results: int = 5,
@@ -543,7 +632,8 @@ def web_search(
 ):
     """Run a web search"""
     render_tool_call("web_search", query)
-    return tavily_client.search(
+    return await asyncio.to_thread(
+        tavily_client.search,
         query,
         max_results=max_results,
         include_raw_content=include_raw_content,
@@ -563,8 +653,12 @@ def _html_to_markdown(html: str) -> str:
 
         return md(html)
     except ImportError:
-        text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(
+            r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE
+        )
+        text = re.sub(
+            r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE
+        )
         text = re.sub(r"<[^>]+>", " ", text)
         text = re.sub(r"\s+", " ", text).strip()
         return text
@@ -585,7 +679,7 @@ def _is_binary_content_type(content_type: str) -> bool:
 
 
 @tool
-def web_fetch(url: str) -> dict:
+async def web_fetch(url: str) -> dict:
     """Fetches content from a specified URL and converts it to text."""
     render_tool_call("web_fetch", url)
     start = time.time()
@@ -615,7 +709,7 @@ def web_fetch(url: str) -> dict:
         if parsed.scheme == "http":
             url = url.replace("http://", "https://", 1)
 
-        with httpx.Client(
+        async with httpx.AsyncClient(
             follow_redirects=True,
             timeout=FETCH_TIMEOUT,
             max_redirects=10,
@@ -624,7 +718,7 @@ def web_fetch(url: str) -> dict:
                 "User-Agent": "ClaudeToolkit/1.0",
             },
         ) as client:
-            response = client.get(url)
+            response = await client.get(url)
 
         content_type = response.headers.get("content-type", "")
         raw_bytes = len(response.content)
@@ -648,7 +742,8 @@ def web_fetch(url: str) -> dict:
 
         if len(markdown_content) > MAX_MARKDOWN_LENGTH:
             markdown_content = (
-                markdown_content[:MAX_MARKDOWN_LENGTH] + "\n\n[Content truncated due to length...]"
+                markdown_content[:MAX_MARKDOWN_LENGTH]
+                + "\n\n[Content truncated due to length...]"
             )
 
         result = f"Content from {url}:\n\n{markdown_content}\n\n---"
@@ -693,7 +788,9 @@ def web_fetch(url: str) -> dict:
         }
 
 
-async def _checkbox_with_other_async(question: str, options: list[str]) -> list[str] | None:
+async def _checkbox_with_other_async(
+    question: str, options: list[str]
+) -> list[str] | None:
     """
     多选 + 自定义输入框（异步版本）
 
@@ -726,7 +823,9 @@ async def _checkbox_with_other_async(question: str, options: list[str]) -> list[
         def get_invalidate_events(self):
             yield input_buffer.on_text_changed
 
-        def preferred_height(self, width, max_available_height, wrap_lines, get_line_prefix):
+        def preferred_height(
+            self, width, max_available_height, wrap_lines, get_line_prefix
+        ):
             return len(self.opts) + 1
 
         def create_content(self, width: int, height: int) -> UIContent:
@@ -855,7 +954,9 @@ async def _checkbox_with_other_async(question: str, options: list[str]) -> list[
             pass
 
     layout = Layout(HSplit([question_window, control_window, input_edit]))
-    app = Application(layout=layout, key_bindings=kb, full_screen=False, erase_when_done=True)
+    app = Application(
+        layout=layout, key_bindings=kb, full_screen=False, erase_when_done=True
+    )
     result = await app.run_async()
     if result is not None:
         console.print(f"[cyan]?[/cyan] {question} [bold]{', '.join(result)}[/bold]")
@@ -892,7 +993,9 @@ async def _select_with_other_async(question: str, options: list[str]) -> str | N
         def get_invalidate_events(self):
             yield input_buffer.on_text_changed
 
-        def preferred_height(self, width, max_available_height, wrap_lines, get_line_prefix):
+        def preferred_height(
+            self, width, max_available_height, wrap_lines, get_line_prefix
+        ):
             return len(self.opts) + 1
 
         def create_content(self, width: int, height: int) -> UIContent:
@@ -1017,7 +1120,9 @@ async def _select_with_other_async(question: str, options: list[str]) -> str | N
             pass
 
     layout = Layout(HSplit([question_window, control_window, input_edit]))
-    app = Application(layout=layout, key_bindings=kb, full_screen=False, erase_when_done=True)
+    app = Application(
+        layout=layout, key_bindings=kb, full_screen=False, erase_when_done=True
+    )
     result = await app.run_async()
     if result is not None:
         console.print(f"[cyan]?[/cyan] {question} [bold]{result}[/bold]")
@@ -1025,7 +1130,7 @@ async def _select_with_other_async(question: str, options: list[str]) -> str | N
 
 
 @tool
-def ask_user(
+async def ask_user(
     question: str = "",
     options: list[str] | None = None,
     is_multiple: bool = False,
@@ -1056,35 +1161,27 @@ def ask_user(
                    - "is_multiple": bool for checkbox vs single select (default: false)
                    When provided, all questions are asked sequentially. Overrides question/options.
     """
-    import asyncio
     import questionary
 
     if questions:
-        return asyncio.run(_ask_multi_questions(questions))
+        return await _ask_multi_questions(questions)
 
     render_tool_call("ask_user", question)
 
     if not options:
-        answer = questionary.text("请输入: ").ask()
+        answer = await asyncio.to_thread(lambda: questionary.text("请输入: ").ask())
         if answer is None:
             return "user_answer:\n(用户取消)"
         return f"user_answer:\n{answer}"
 
     try:
         if is_multiple:
-            try:
-                selected = asyncio.run(_checkbox_with_other_async(question, options))
-            except RuntimeError:
-                selected = None
+            selected = await _checkbox_with_other_async(question, options)
             if selected is None:
                 return "user_answer:\n(用户取消)"
             result = ", ".join(selected)
         else:
-            try:
-                answer = asyncio.run(_select_with_other_async(question, options))
-            except RuntimeError:
-                # Already in event loop (shouldn't happen for tool calls)
-                answer = None
+            answer = await _select_with_other_async(question, options)
             if answer is None:
                 return "user_answer:\n(用户取消)"
             result = answer
@@ -1219,7 +1316,9 @@ async def agent(
             _display._subagent_parallel = True
             _display._start_progress()
             if _display._progress_task is None or _display._progress_task.done():
-                _display._progress_task = asyncio.ensure_future(_display._progress_updater())
+                _display._progress_task = asyncio.ensure_future(
+                    _display._progress_updater()
+                )
 
     try:
         result = await run_subagent(
@@ -1362,7 +1461,9 @@ Args:
         status = t.get("status", "pending")
         content = t.get("content", "")
         priority = t.get("priority", "medium")
-        marker = {"completed": "[x]", "in_progress": "[>]", "cancelled": "[-]"}.get(status, "[ ]")
+        marker = {"completed": "[x]", "in_progress": "[>]", "cancelled": "[-]"}.get(
+            status, "[ ]"
+        )
         lines.append(f"  {marker} {content} (priority: {priority})")
 
     output = "\n".join(lines)
@@ -1386,7 +1487,9 @@ Args:
                 "pending": "[ ]",
             }
             marker = marker_map.get(status, "[ ]")
-            ps = {"high": "red bold", "medium": "yellow", "low": "dim"}.get(priority, "")
+            ps = {"high": "red bold", "medium": "yellow", "low": "dim"}.get(
+                priority, ""
+            )
             line = Text(f"    {marker} {content} ")
             line.append(f"({priority})", style=ps)
             console.print(line)

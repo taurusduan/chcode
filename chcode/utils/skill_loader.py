@@ -107,49 +107,94 @@ class SkillLoader:
         """
         self.skill_paths = skill_paths or DEFAULT_SKILL_PATHS
         self._metadata_cache: dict[str, SkillMetadata] = {}
+        self._scan_cache: list[SkillMetadata] | None = None
+        self._dir_mtimes: dict[str, float] = {}
+        self._file_mtimes: dict[str, float] = {}
 
-    # 返回skill基本数据，保存skill到skill字典中
-    def scan_skills(self) -> list[SkillMetadata]:
+    def _is_cache_valid(self) -> bool:
+        for base_path in self.skill_paths:
+            key = str(base_path)
+            try:
+                if base_path.exists():
+                    dir_mtime = base_path.stat().st_mtime
+                    if key not in self._dir_mtimes:
+                        return False
+                    if dir_mtime != self._dir_mtimes[key]:
+                        return False
+                else:
+                    if key in self._dir_mtimes:
+                        return False
+            except OSError:
+                return False
+
+        for fpath, cached_mtime in self._file_mtimes.items():
+            try:
+                if (
+                    not Path(fpath).exists()
+                    or Path(fpath).stat().st_mtime != cached_mtime
+                ):
+                    return False
+            except OSError:
+                return False
+
+        return True
+
+    def _save_mtimes(self) -> None:
+        self._dir_mtimes.clear()
+        self._file_mtimes.clear()
+        for base_path in self.skill_paths:
+            try:
+                if base_path.exists():
+                    self._dir_mtimes[str(base_path)] = base_path.stat().st_mtime
+                    for skill_dir in base_path.iterdir():
+                        if skill_dir.is_dir():
+                            skill_md = skill_dir / "SKILL.md"
+                            if skill_md.exists():
+                                self._file_mtimes[str(skill_md)] = (
+                                    skill_md.stat().st_mtime
+                                )
+            except OSError:
+                pass
+
+    def scan_skills(self, *, force: bool = False) -> list[SkillMetadata]:
         """
         Level 1: 扫描所有 Skills 元数据
 
         遍历 skill_paths，查找包含 SKILL.md 的目录，
         解析 YAML frontmatter 提取 name 和 description。
 
+        Args:
+            force: 强制忽略缓存，重新扫描磁盘
+
         Returns:
             所有发现的 Skills 元数据列表
-
-        示例输出：
-            [
-                SkillMetadata(name='news-extractor', description='新闻站点内容提取...', ...),
-                SkillMetadata(name='slides-generator', description='Generate slides...', ...),
-            ]
         """
+        if not force and self._scan_cache is not None and self._is_cache_valid():
+            return self._scan_cache
+
         skills = []
         seen_names = set()
 
         for base_path in self.skill_paths:
-            if (
-                not base_path.exists()
-            ):  # 判断路径(项目级skill路径和全局skill路径)是否存在
-                continue  # 不存在就直接跳过
+            if not base_path.exists():
+                continue
 
-            # 遍历 skills 目录下的每个子目录
             for skill_dir in base_path.iterdir():
                 if not skill_dir.is_dir():
                     continue
 
-                # 检查是否存在 SKILL.md
                 skill_md = skill_dir / "SKILL.md"
                 if not skill_md.exists():
                     continue
 
-                # 解析元数据
                 metadata = self._parse_skill_metadata(skill_md)
                 if metadata and metadata.name not in seen_names:
                     skills.append(metadata)
                     seen_names.add(metadata.name)
                     self._metadata_cache[metadata.name] = metadata
+
+        self._scan_cache = skills
+        self._save_mtimes()
         return skills
 
     # 解析skill元数据

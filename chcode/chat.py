@@ -246,6 +246,7 @@ class ChatREPL:
         self.session_mgr: SessionManager | None = None
         self.git_manager: GitManager | None = None
         self.git = False
+        self._git_cp_count = 0
         self._stop_requested = False
         self._processing = False
         # 初始化 prompt-toolkit 会话（用于命令自动补全）
@@ -347,6 +348,7 @@ class ChatREPL:
             if not self.git_manager.is_repo():
                 await asyncio.to_thread(self.git_manager.init)
             self.git = True
+            self._git_cp_count = self.git_manager.count_checkpoints()
 
     # ─── 主循环 ────────────────────────────────────────
 
@@ -416,7 +418,7 @@ class ChatREPL:
                     parts.append(styled)
                 parts.append("普通模式" if not self.yolo else "YOLO 模式")
                 if self.git and self.git_manager and self.git_manager.is_repo():
-                    parts.append(f"Git ({self.git_manager.count_checkpoints()} cp)")
+                    parts.append(f"Git ({self._git_cp_count} cp)")
                 wp = str(self.workplace_path) if self.workplace_path else ""
                 if wp:
                     parts.append(f"cwd: {wp}")
@@ -564,14 +566,9 @@ class ChatREPL:
 
         if config:
             self.model_config = config
-            # 重建 agent
-            self.agent = await asyncio.to_thread(
-                build_agent,
-                self.model_config,
-                self.checkpointer,
-                None,
-                self.yolo,
-            )
+            from chcode.agent_setup import update_summarization_model
+
+            update_summarization_model(config)
             self._render_status_bar()
 
     async def _cmd_tools(self, _arg: str) -> None:
@@ -592,9 +589,9 @@ class ChatREPL:
         await manage_skills(self.session_mgr)
 
     async def _cmd_history(self, _arg: str) -> None:
-        if not self.session_mgr:
+        if not self.session_mgr or not self.checkpointer:
             return
-        sessions = self.session_mgr.list_sessions()
+        sessions = await self.session_mgr.list_sessions(self.checkpointer)
         if not sessions:
             render_warning("没有历史会话")
             return
@@ -616,7 +613,7 @@ class ChatREPL:
         elif op == "删除此会话":
             ok = await confirm(f"确定删除会话 {action}？", default=False)
             if ok:
-                self.session_mgr.delete_session(action)
+                await self.session_mgr.delete_session(action, self.checkpointer)
                 if action == self.session_mgr.thread_id:
                     self._cmd_new("")
                 render_success("会话已删除")
@@ -720,6 +717,7 @@ class ChatREPL:
 
         if self.git_manager.is_repo():
             count = self.git_manager.count_checkpoints()
+            self._git_cp_count = count
             render_success(f"Git 仓库已初始化 ({count} 个检查点)")
         else:
             render_warning("Git 仓库未初始化")
@@ -732,25 +730,21 @@ class ChatREPL:
         if action is None:
             return
         self.yolo = "Yolo" in action
-        # 重建 agent 以更新 HITL 配置
-        self.agent = await asyncio.to_thread(
-            build_agent,
-            self.model_config,
-            self.checkpointer,
-            None,
-            self.yolo,
-        )
+        from chcode.agent_setup import update_hitl_config
+
+        update_hitl_config(self.yolo)
         mode_str = "Yolo" if self.yolo else "Common"
         render_success(f"已切换到 {mode_str} 模式")
 
     async def _cmd_workdir(self, _arg: str) -> None:
         saved = load_workplace()
-        if saved:
-            choices = [str(saved), "自定义路径..."]
-        else:
-            choices = ["自定义路径..."]
+        choices = [str(saved)] if saved else []
 
-        result = await select_or_custom("选择工作目录:", choices)
+        result = await select_or_custom(
+            "选择工作目录:", choices,
+            custom_label="自定义路径...",
+            custom_prompt="请输入工作目录路径: ",
+        )
         if not result:
             return
 
@@ -830,9 +824,7 @@ class ChatREPL:
 
         while True:
             # 第一步：选择操作类型
-            action = await select(
-                "选择操作:", ["编辑消息", "分叉消息", "删除消息"]
-            )
+            action = await select("选择操作:", ["编辑消息", "分叉消息", "删除消息"])
             if not action:
                 return
 
@@ -859,13 +851,9 @@ class ChatREPL:
                 delete_ids = []
                 for chosen in chosen_list:
                     try:
-                        sel_idx = (
-                            int(chosen.split("]")[0].replace("[", "")) - 1
-                        )
+                        sel_idx = int(chosen.split("]")[0].replace("[", "")) - 1
                         if 0 <= sel_idx < len(groups):
-                            delete_ids.extend(
-                                [m.id for m in groups[sel_idx]]
-                            )
+                            delete_ids.extend([m.id for m in groups[sel_idx]])
                     except (ValueError, IndexError):
                         continue
 
@@ -976,23 +964,16 @@ class ChatREPL:
                 if old_path != new_path:
                     render_info("复制工作目录文件...")
                     try:
-                        await asyncio.to_thread(
-                            self._copy_dir, old_path, new_path
-                        )
+                        await asyncio.to_thread(self._copy_dir, old_path, new_path)
                         sessions_path = self.workplace_path / ".chat" / "sessions"
                         if sessions_path.exists():
-
-                            await asyncio.to_thread(
-                                shutil.rmtree, sessions_path
-                            )
+                            await asyncio.to_thread(shutil.rmtree, sessions_path)
                             sessions_path.mkdir(exist_ok=True)
                     except Exception as e:
                         render_warning(f"复制文件失败: {e}")
 
                 self.session_mgr = SessionManager(self.workplace_path)
-                db_path = (
-                    self.workplace_path / ".chat" / "sessions" / "checkpointer.db"
-                )
+                db_path = self.workplace_path / ".chat" / "sessions" / "checkpointer.db"
                 self.checkpointer = await create_checkpointer(db_path)
 
                 self.agent = await asyncio.to_thread(
@@ -1199,7 +1180,11 @@ class ChatREPL:
                 ).values.get("messages", [])
                 new_msgs = find_and_slice_from_end(current_messages, "human")
                 ids = [m.id for m in new_msgs]
-                self.git_manager.add_commit("&".join(ids))
+                result = await asyncio.to_thread(
+                    self.git_manager.add_commit, "&".join(ids)
+                )
+                if isinstance(result, int):
+                    self._git_cp_count = result
 
         finally:
             self._processing = False

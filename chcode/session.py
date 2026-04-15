@@ -4,12 +4,14 @@
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from rich.console import Console
+
+if TYPE_CHECKING:
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 console = Console()
 
@@ -19,7 +21,6 @@ class SessionManager:
         self.workplace_path = workplace_path
         self.sessions_dir = workplace_path / ".chat" / "sessions"
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
-        self.db_path = self.sessions_dir / "checkpointer.db"
         self.thread_id = self._new_thread_id()
 
     def _new_thread_id(self) -> str:
@@ -35,35 +36,24 @@ class SessionManager:
     def set_thread(self, thread_id: str) -> None:
         self.thread_id = thread_id
 
-    def list_sessions(self) -> list[str]:
-        """从 checkpointer.db 获取所有历史 thread_id"""
-        if not self.db_path.exists():
-            return []
+    async def list_sessions(self, checkpointer: AsyncSqliteSaver) -> list[str]:
+        """从 checkpointer 获取所有历史 thread_id"""
         try:
-            conn = sqlite3.connect(str(self.db_path))
-            cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT thread_id FROM checkpoints")
-            rows = cursor.fetchall()
-            conn.close()
-            return [row[0] for row in rows]
+            await checkpointer.setup()
+            async with checkpointer.lock:
+                rows = await checkpointer.conn.execute_fetchall(
+                    "SELECT DISTINCT thread_id FROM checkpoints"
+                )
+            return [row[0] for row in rows if row[0]]
         except Exception:
             return []
 
-    def delete_session(self, thread_id: str) -> bool:
+    async def delete_session(
+        self, thread_id: str, checkpointer: AsyncSqliteSaver
+    ) -> bool:
         """删除指定会话的所有数据"""
-        if not self.db_path.exists():
-            return False
         try:
-            conn = sqlite3.connect(str(self.db_path))
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,))
-            for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoint_writes_v2"):
-                try:
-                    cursor.execute(f"DELETE FROM {table} WHERE thread_id = ?", (thread_id,))
-                except sqlite3.OperationalError:
-                    pass
-            conn.commit()
-            conn.close()
+            await checkpointer.adelete_thread(thread_id)
             return True
         except Exception as e:
             console.print(f"[red]删除会话失败: {e}[/red]")

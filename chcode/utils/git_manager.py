@@ -16,12 +16,14 @@ class GitManager:
         self.git_cmd = "git"
         self.checkpoints_file = self.repo_path / ".git" / "checkpoints.json"
         self.gitignore_file = self.repo_path / ".gitignore"
-        # self.checkpoint_dict = {}
         self.current_id = 0
+        self._is_repo: bool | None = None
 
-    def _run(self, args: list, timeout: int = 30, silent: bool = True) -> subprocess.CompletedProcess:
+    def _run(
+        self, args: list, timeout: int = 30, silent: bool = True
+    ) -> subprocess.CompletedProcess:
         """执行Git命令
-        
+
         Args:
             args: Git 命令参数
             timeout: 超时时间（秒）
@@ -52,8 +54,11 @@ class GitManager:
 
     def is_repo(self) -> bool:
         """检查是否为Git仓库"""
+        if self._is_repo is not None:
+            return self._is_repo
         try:
-            return self._run(["rev-parse", "--git-dir"]).returncode == 0
+            self._is_repo = self._run(["rev-parse", "--git-dir"]).returncode == 0
+            return self._is_repo
         except:
             return False
 
@@ -78,7 +83,7 @@ class GitManager:
         # 添加文件
         if self._run(["add"] + files).returncode != 0:
             return False
-        
+
         # 提交
         commit_msg = f"{message_ids} (CP#{self.current_id + 1})"
         commit_result = self._run(["commit", "-m", commit_msg])
