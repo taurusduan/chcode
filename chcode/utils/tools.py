@@ -12,6 +12,7 @@ ToolRuntime 提供访问运行时信息的统一接口：
 """
 
 import asyncio
+import json
 import os
 import platform
 import re
@@ -36,8 +37,29 @@ from chcode.utils.shell import (
 from chcode.utils.skill_loader import SkillAgentContext
 from tavily import TavilyClient
 
-tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY", ""))
 console = Console()
+
+CONFIG_DIR = Path.home() / ".chat"
+SETTING_JSON = CONFIG_DIR / "chagent.json"
+
+_tavily_api_key = os.getenv("TAVILY_API_KEY", "")
+if SETTING_JSON.exists():
+    try:
+        data = json.loads(SETTING_JSON.read_text(encoding="utf-8"))
+        api_key = data.get("tavily_api_key", "")
+        if api_key:
+            _tavily_api_key = api_key
+    except Exception:
+        pass
+
+tavily_client = TavilyClient(api_key=_tavily_api_key)
+
+
+def update_tavily_api_key(api_key: str) -> None:
+    """运行时更新 Tavily API Key"""
+    global _tavily_api_key, tavily_client
+    _tavily_api_key = api_key
+    tavily_client = TavilyClient(api_key=api_key)
 
 
 def resolve_path(file_path: str, working_directory: Path) -> Path:  # type: ignore[assignment]

@@ -83,6 +83,7 @@ SLASH_COMMANDS = {
     "/history": "历史会话",
     "/compress": "压缩会话",
     "/git": "Git 状态",
+    "/search": "配置 Tavily 搜索 API Key",
     "/mode": "切换 Common/Yolo 模式",
     "/workdir": "切换工作目录",
     "/tools": "显示内置工具",
@@ -437,6 +438,7 @@ class ChatREPL:
                     return  # 有内容时走默认补全
                 self.yolo = not self.yolo
                 from chcode.agent_setup import update_hitl_config
+
                 update_hitl_config(self.yolo)
                 mode = "Yolo" if self.yolo else "Common"
                 event.app.renderer._last_rendered_width = 0  # 强制刷新 toolbar
@@ -450,7 +452,9 @@ class ChatREPL:
                 if hasattr(self, "_context_text") and self._context_text:
                     styled = _rich_to_html(self._context_text)
                     parts.append(styled)
-                parts.append("普通模式" if not self.yolo else "<ansired>YOLO 模式</ansired>")
+                parts.append(
+                    "普通模式" if not self.yolo else "<ansired>YOLO 模式</ansired>"
+                )
                 if self.git and self.git_manager and self.git_manager.is_repo():
                     parts.append(f"Git ({self._git_cp_count} cp)")
                 wp = str(self.workplace_path) if self.workplace_path else ""
@@ -553,6 +557,7 @@ class ChatREPL:
             "/history": self._cmd_history,
             "/compress": self._cmd_compress,
             "/git": self._cmd_git,
+            "/search": self._cmd_search,
             "/mode": self._cmd_mode,
             "/workdir": self._cmd_workdir,
             "/tools": self._cmd_tools,
@@ -757,6 +762,36 @@ class ChatREPL:
         else:
             render_warning("Git 仓库未初始化")
 
+    async def _cmd_search(self, _arg: str) -> None:
+        from chcode.config import load_tavily_api_key, save_tavily_api_key
+        from chcode.utils.tools import update_tavily_api_key
+
+        current = load_tavily_api_key()
+        masked = (
+            f"{current[:6]}...{current[-4:]}"
+            if current and len(current) > 10
+            else (current or "未配置")
+        )
+        render_info(f"当前 Tavily API Key: {masked}")
+
+        action = await select("操作:", ["配置 API Key", "清除 API Key", "返回"])
+        if action is None or action == "返回":
+            return
+
+        if action == "清除 API Key":
+            save_tavily_api_key("")
+            update_tavily_api_key("")
+            render_success("Tavily API Key 已清除")
+            return
+
+        new_key = await text("请输入 Tavily API Key:")
+        if new_key:
+            save_tavily_api_key(new_key)
+            update_tavily_api_key(new_key)
+            render_success("Tavily API Key 已保存")
+        else:
+            render_warning("未输入，已取消")
+
     async def _cmd_mode(self, _arg: str) -> None:
         action = await select(
             "选择模式:",
@@ -829,6 +864,7 @@ class ChatREPL:
             ("/history", "历史会话"),
             ("/compress", "压缩会话"),
             ("/git", "Git 状态"),
+            ("/search", "配置 Tavily 搜索 API Key"),
             ("/mode", "切换 Common/Yolo 模式"),
             ("/workdir", "切换工作目录"),
             ("/tools", "显示内置工具"),
@@ -1114,6 +1150,7 @@ class ChatREPL:
 
             if self._skill_loader is None:
                 from chcode.utils.skill_loader import SkillLoader
+
                 self._skill_loader = SkillLoader(
                     [
                         self.workplace_path / ".chat/skills",
@@ -1273,6 +1310,7 @@ class ChatREPL:
                         render_warning(f"[HITL] edit  修改文件: {file_path}")
                         import difflib
                         from rich.table import Table
+
                         # 查找 old_str 在文件中的起始行号
                         start_line = 1
                         try:
@@ -1287,7 +1325,12 @@ class ChatREPL:
                             pass
                         old_lines = old_str.splitlines()
                         new_lines = new_str.splitlines()
-                        table = Table(show_header=False, show_edge=False, padding=(0, 1), border_style="dim")
+                        table = Table(
+                            show_header=False,
+                            show_edge=False,
+                            padding=(0, 1),
+                            border_style="dim",
+                        )
                         table.add_column("old", ratio=1)
                         table.add_column("new", ratio=1)
                         sm = difflib.SequenceMatcher(None, old_lines, new_lines)
@@ -1297,15 +1340,36 @@ class ChatREPL:
                             if tag == "equal":
                                 for k in range(i2 - i1):
                                     table.add_row(
-                                        Text(f"  {old_num:>3}  {old_lines[i1+k]}", style="dim"),
-                                        Text(f"  {new_num:>3}  {new_lines[j1+k]}", style="dim"),
+                                        Text(
+                                            f"  {old_num:>3}  {old_lines[i1 + k]}",
+                                            style="dim",
+                                        ),
+                                        Text(
+                                            f"  {new_num:>3}  {new_lines[j1 + k]}",
+                                            style="dim",
+                                        ),
                                     )
-                                    old_num += 1; new_num += 1
+                                    old_num += 1
+                                    new_num += 1
                             elif tag == "replace":
                                 max_len = max(i2 - i1, j2 - j1)
                                 for k in range(max_len):
-                                    old_text = Text(f"{old_num:>3} - {old_lines[i1+k]}", style="red") if k < i2 - i1 else None
-                                    new_text = Text(f"{new_num:>3} + {new_lines[j1+k]}", style="green") if k < j2 - j1 else None
+                                    old_text = (
+                                        Text(
+                                            f"{old_num:>3} - {old_lines[i1 + k]}",
+                                            style="red",
+                                        )
+                                        if k < i2 - i1
+                                        else None
+                                    )
+                                    new_text = (
+                                        Text(
+                                            f"{new_num:>3} + {new_lines[j1 + k]}",
+                                            style="green",
+                                        )
+                                        if k < j2 - j1
+                                        else None
+                                    )
                                     table.add_row(old_text, new_text)
                                     if k < i2 - i1:
                                         old_num += 1
@@ -1313,11 +1377,22 @@ class ChatREPL:
                                         new_num += 1
                             elif tag == "delete":
                                 for k in range(i2 - i1):
-                                    table.add_row(Text(f"{old_num:>3} - {old_lines[i1+k]}", style="red"))
+                                    table.add_row(
+                                        Text(
+                                            f"{old_num:>3} - {old_lines[i1 + k]}",
+                                            style="red",
+                                        )
+                                    )
                                     old_num += 1
                             elif tag == "insert":
                                 for k in range(j2 - j1):
-                                    table.add_row(None, Text(f"{new_num:>3} + {new_lines[j1+k]}", style="green"))
+                                    table.add_row(
+                                        None,
+                                        Text(
+                                            f"{new_num:>3} + {new_lines[j1 + k]}",
+                                            style="green",
+                                        ),
+                                    )
                                     new_num += 1
                         console.print(table)
                         content = None  # 已直接渲染，跳过通用渲染

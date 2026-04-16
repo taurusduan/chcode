@@ -83,7 +83,6 @@ def get_default_model_config() -> dict | None:
     return data.get("default") or None
 
 
-
 def detect_env_api_keys() -> list[dict]:
     """检测环境变量中的 API Key，返回推荐配置列表"""
     results = []
@@ -154,6 +153,8 @@ async def first_run_configure() -> dict | None:
         data = {"default": config, "fallback": {}}
         save_model_json(data)
         console.print(f"[green]配置完成: {model}[/green]")
+
+        await configure_tavily引导()
         return config
     else:
         console.print("[yellow]未检测到环境变量中的 API Key[/yellow]")
@@ -183,6 +184,7 @@ async def configure_new_model() -> dict | None:
         await asyncio.to_thread(model.invoke, "你好")
     except Exception as e:
         import traceback
+
         err_msg = str(e)
         if "null value for 'choices'" not in err_msg:
             console.print(f"[red]连接测试失败: {err_msg}[/red]")
@@ -228,6 +230,7 @@ async def edit_current_model() -> dict | None:
         await asyncio.to_thread(model.invoke, "你好")
     except Exception as e:
         import traceback
+
         err_msg = str(e)
         if "null value for 'choices'" not in err_msg:
             console.print(f"[red]连接测试失败: {err_msg}[/red]")
@@ -308,6 +311,32 @@ def save_workplace(path: Path) -> None:
     )
 
 
+def load_tavily_api_key() -> str:
+    """加载 Tavily API Key"""
+    if SETTING_JSON.exists():
+        try:
+            data = json.loads(SETTING_JSON.read_text(encoding="utf-8"))
+            return data.get("tavily_api_key", "")
+        except Exception:
+            pass
+    return os.getenv("TAVILY_API_KEY", "")
+
+
+def save_tavily_api_key(api_key: str) -> None:
+    """保存 Tavily API Key"""
+    ensure_config_dir()
+    data = {}
+    if SETTING_JSON.exists():
+        try:
+            data = json.loads(SETTING_JSON.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    data["tavily_api_key"] = api_key
+    SETTING_JSON.write_text(
+        json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8"
+    )
+
+
 # ─── 上下文窗口大小 ──────────────────────────────────────────
 
 CONTEXT_WINDOW_SIZES: dict[str, int] = {
@@ -337,3 +366,38 @@ def get_context_window_size(model_name: str) -> int:
         if key in model_name.lower():
             return size
     return _DEFAULT_CONTEXT_WINDOW
+
+
+async def configure_tavily引导() -> None:
+    """首次引导时配置 Tavily"""
+    tavily_env = os.getenv("TAVILY_API_KEY")
+
+    if tavily_env:
+        save_tavily_api_key(tavily_env)
+        console.print("[dim]检测到 TAVILY_API_KEY 环境变量，已自动配置 Tavily[/dim]")
+        return
+
+    if SETTING_JSON.exists():
+        try:
+            data = json.loads(SETTING_JSON.read_text(encoding="utf-8"))
+            current = data.get("tavily_api_key", "")
+            if current:
+                console.print(
+                    f"[dim]已配置 Tavily: {current[:6]}...{current[-4:]}[/dim]"
+                )
+                return
+        except Exception:
+            pass
+
+    console.print()
+    result = await select("是否配置 Tavily 搜索引擎?", ["是", "否"])
+    if result is None or result == "否":
+        console.print("[dim]已跳过，后续可通过 /search 命令配置[/dim]")
+        return
+
+    new_key = await text("请输入 Tavily API Key:")
+    if new_key:
+        save_tavily_api_key(new_key)
+        console.print("[green]Tavily API Key 已保存[/green]")
+    else:
+        console.print("[dim]已取消[/dim]")
