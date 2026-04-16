@@ -13,7 +13,7 @@ from typing import Any
 from rich.console import Console
 from rich.panel import Panel
 
-from chcode.prompts import select, confirm, model_config_form
+from chcode.prompts import select, confirm, model_config_form, text
 
 console = Console()
 
@@ -154,7 +154,7 @@ async def first_run_configure() -> dict | None:
         save_model_json(data)
         console.print(f"[green]配置完成: {model}[/green]")
 
-        await configure_tavily引导()
+        await configure_tavily()
         return config
     else:
         console.print("[yellow]未检测到环境变量中的 API Key[/yellow]")
@@ -206,6 +206,8 @@ async def configure_new_model() -> dict | None:
 
     save_model_json(data)
     console.print(f"[green]模型配置已保存: {config['model']}[/green]")
+
+    await configure_tavily()
     return config
 
 
@@ -368,12 +370,15 @@ def get_context_window_size(model_name: str) -> int:
     return _DEFAULT_CONTEXT_WINDOW
 
 
-async def configure_tavily引导() -> None:
+async def configure_tavily() -> None:
     """首次引导时配置 Tavily"""
     tavily_env = os.getenv("TAVILY_API_KEY")
 
     if tavily_env:
         save_tavily_api_key(tavily_env)
+        from chcode.utils.tools import update_tavily_api_key
+
+        update_tavily_api_key(tavily_env)
         console.print("[dim]检测到 TAVILY_API_KEY 环境变量，已自动配置 Tavily[/dim]")
         return
 
@@ -382,6 +387,9 @@ async def configure_tavily引导() -> None:
             data = json.loads(SETTING_JSON.read_text(encoding="utf-8"))
             current = data.get("tavily_api_key", "")
             if current:
+                from chcode.utils.tools import update_tavily_api_key
+
+                update_tavily_api_key(current)
                 console.print(
                     f"[dim]已配置 Tavily: {current[:6]}...{current[-4:]}[/dim]"
                 )
@@ -398,6 +406,9 @@ async def configure_tavily引导() -> None:
     new_key = await text("请输入 Tavily API Key:")
     if new_key:
         save_tavily_api_key(new_key)
-        console.print("[green]Tavily API Key 已保存[/green]")
+        from chcode.utils.tools import update_tavily_api_key
+
+        update_tavily_api_key(new_key)
+        console.print("[green]Tavily API Key 已保存并生效[/green]")
     else:
         console.print("[dim]已取消[/dim]")

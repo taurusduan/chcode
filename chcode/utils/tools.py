@@ -52,14 +52,28 @@ if SETTING_JSON.exists():
     except Exception:
         pass
 
-tavily_client = TavilyClient(api_key=_tavily_api_key)
+_tavily_client: TavilyClient | None = None
+
+
+def get_tavily_client() -> TavilyClient | None:
+    """获取 Tavily 客户端（懒加载）"""
+    global _tavily_client
+    if _tavily_client is not None:
+        return _tavily_client
+    if not _tavily_api_key:
+        return None
+    _tavily_client = TavilyClient(api_key=_tavily_api_key)
+    return _tavily_client
 
 
 def update_tavily_api_key(api_key: str) -> None:
     """运行时更新 Tavily API Key"""
-    global _tavily_api_key, tavily_client
+    global _tavily_api_key, _tavily_client
     _tavily_api_key = api_key
-    tavily_client = TavilyClient(api_key=api_key)
+    if api_key:
+        _tavily_client = TavilyClient(api_key=api_key)
+    else:
+        _tavily_client = None
 
 
 def resolve_path(file_path: str, working_directory: Path) -> Path:  # type: ignore[assignment]
@@ -655,8 +669,11 @@ async def web_search(
 ):
     """Run a web search"""
     render_tool_call("web_search", query)
+    client = get_tavily_client()
+    if client is None:
+        return "[ERROR] Tavily API Key 未配置，请使用 /search 命令配置"
     return await asyncio.to_thread(
-        tavily_client.search,
+        client.search,
         query,
         max_results=max_results,
         include_raw_content=include_raw_content,
