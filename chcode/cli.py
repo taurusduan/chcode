@@ -5,6 +5,48 @@ CLI 入口 — Typer 应用
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
+
+
+def _setup_langsmith_guard():
+    """自动检测 LangSmith 429 并禁用追踪，防止 stderr 污染终端 UI"""
+    _disabled = False
+
+    class _Guard:
+        def __init__(self, original):
+            self._original = original
+
+        def write(self, data):
+            nonlocal _disabled
+            if not data:
+                return 0
+            if _disabled and ("LangSmith" in data or "langsmith" in data):
+                if "429" in data or "Rate limit" in data:
+                    os.environ["LANGCHAIN_TRACING_V2"] = "false"
+                return len(data)
+            if "LangSmithRateLimitError" in data or (
+                "langsmith" in data and "429" in data
+            ):
+                _disabled = True
+                os.environ["LANGCHAIN_TRACING_V2"] = "false"
+                return len(data)
+            return self._original.write(data)
+
+        def flush(self):
+            self._original.flush()
+
+        def __getattr__(self, name):
+            return getattr(self._original, name)
+
+    _original = sys.__stderr__ or sys.stderr
+    _guard = _Guard(_original)
+    sys.stderr = _guard
+    sys.__stderr__ = _guard
+
+
+_setup_langsmith_guard()
+
 import typer
 from rich.console import Console
 

@@ -88,6 +88,7 @@ SLASH_COMMANDS = {
     "/mode": "切换 Common/Yolo 模式",
     "/workdir": "切换工作目录",
     "/tools": "显示内置工具",
+    "/langsmith": "LangSmith 追踪开关",
     "/messages": "管理历史消息（编辑/分叉/删除）",
     "/help": "显示帮助",
     "/quit": "退出",
@@ -378,7 +379,15 @@ class ChatREPL:
                     continue
 
                 # 正常对话
+                prev_tracing = os.environ.get("LANGCHAIN_TRACING_V2", "false").lower()
                 await self._process_input(user_input)
+
+                # 检查 LangSmith 是否因 429 自动关闭
+                if prev_tracing == "true" and os.environ.get("LANGCHAIN_TRACING_V2", "false").lower() != prev_tracing:
+                    render_warning(
+                        "LangSmith 追踪已因配额耗尽自动关闭 "
+                        "(/langsmith 可手动管理)"
+                    )
 
             except KeyboardInterrupt:
                 if self._processing:
@@ -551,6 +560,7 @@ class ChatREPL:
             "/mode": self._cmd_mode,
             "/workdir": self._cmd_workdir,
             "/tools": self._cmd_tools,
+            "/langsmith": self._cmd_langsmith,
             "/messages": self._cmd_messages,
             "/help": self._cmd_help,
             "/quit": self._cmd_quit,
@@ -601,6 +611,18 @@ class ChatREPL:
 
             update_summarization_model(config)
             self._render_status_bar()
+
+    async def _cmd_langsmith(self, _arg: str) -> None:
+        current = os.environ.get("LANGCHAIN_TRACING_V2", "false").lower() == "true"
+        state = "开启" if current else "关闭"
+        action = await select(
+            f"LangSmith 追踪: {state}",
+            ["开启追踪", "关闭追踪"],
+        )
+        if action is None:
+            return
+        os.environ["LANGCHAIN_TRACING_V2"] = "true" if "开启" in action else "false"
+        render_success(f"LangSmith 追踪已{'开启' if '开启' in action else '关闭'}")
 
     async def _cmd_tools(self, _arg: str) -> None:
         from chcode.utils.tools import ALL_TOOLS
@@ -874,6 +896,7 @@ class ChatREPL:
             ("/mode", "切换 Common/Yolo 模式"),
             ("/workdir", "切换工作目录"),
             ("/tools", "显示内置工具"),
+            ("/langsmith", "LangSmith 追踪开关"),
             ("/messages", "管理历史消息（编辑/分叉/删除）"),
             ("/help", "显示此帮助"),
             ("/quit", "退出"),
