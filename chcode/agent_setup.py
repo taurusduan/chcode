@@ -81,6 +81,7 @@ def advance_fallback() -> None:
 
 def _load_fallback_config() -> dict | None:
     """获取当前备用模型"""
+    global _fallback_models
     if not _fallback_models:
         from chcode.config import load_model_json
 

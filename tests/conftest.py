@@ -1,0 +1,26 @@
+from pathlib import Path
+
+import pytest
+
+
+@pytest.fixture
+def tmp_workplace(tmp_path: Path) -> Path:
+    return tmp_path / "workplace"
+
+
+@pytest.fixture(autouse=True)
+def reset_global_state():
+    yield
+    try:
+        from chcode.agent_setup import set_fallback_models
+        set_fallback_models([])
+
+        import chcode.config as config_mod
+        config_mod._model_json_cache = None
+
+        import chcode.utils.tools as tools_mod
+        tools_mod._tavily_api_key = ""
+        tools_mod._tavily_key_loaded = False
+        tools_mod._tavily_client = None
+    except Exception:
+        pass

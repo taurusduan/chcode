@@ -99,26 +99,32 @@ class SlashCommandCompleter(Completer):
     """斜杠命令自动补全器 - 输入 / 时触发下拉列表"""
 
     def get_completions(self, document, complete_event):
+
+        # 获取光标前的完整文本
         text = document.text_before_cursor
 
         # 当输入 / 时触发补全
         if text.startswith("/"):
-            partial = text[1:].lower()
 
+            # 把输入的文本中的字母转化成小写来处理（大小写不敏感）
+            partial = text.lower()
+
+            # 遍历预先定义的斜杠命令字典
             for cmd, desc in SLASH_COMMANDS.items():
-                cmd_name = cmd[1:]  # 去掉 /
-                if cmd_name.startswith(partial):
+                # 如果转化成小写的输入框中文本 被字典里 命令名 的 前缀匹配 到
+                if cmd.startswith(partial):
+                    # 生成命令
                     yield Completion(
-                        cmd,
-                        start_position=-len(text),
-                        display=cmd,
-                        display_meta=desc,
+                        cmd, # 返回完整的命令
+                        start_position=-len(partial), # 返回前清空输入框已有输入
+                        display=cmd, # 下拉框显示的命令名
+                        display_meta=desc, # 下拉框显示的命令名的描述
                     )
 
 
 # ─── 辅助函数 ──────────────────────────────────────────
 
-
+# 简易的 BBCode 风格标记语言解析 （论坛或聊天软件）
 _RE_TAG_SPLIT = re.compile(r"(\[/?[^\]]+\])")
 _RE_TAG_OPEN = re.compile(r"^\[([^\]]+)\]$")
 _RE_TAG_CLOSE = re.compile(r"^\[/([^\]]*)\]$")
@@ -162,7 +168,7 @@ def _rich_to_html(text: str) -> str:
 
     return "".join(result)
 
-
+# 获取最近的几组消息
 def find_and_slice_from_end(lst, x):
     """从后往前查找第一个 type==x 的元素，返回从该元素到末尾的切片"""
     for i in range(len(lst) - 1, -1, -1):
@@ -170,7 +176,7 @@ def find_and_slice_from_end(lst, x):
             return lst[i:]
     return []
 
-
+# 消息分组
 def _group_messages_by_turn(messages: list) -> list[list]:
     """
     将消息按轮次分组（参考 chagent 逻辑）
@@ -180,19 +186,19 @@ def _group_messages_by_turn(messages: list) -> list[list]:
     current_group = []
 
     for msg in messages:
-        if msg.type == "human":
-            if current_group:
+        if msg.type == "human": # 下一组消息的第一个消息：HumanMessage
+            if current_group: # 当前消息组
                 groups.append(current_group)
-            current_group = [msg]
+            current_group = [msg] # 把下一组消息的第一个消息：HumanMessage，放入新的消息组
         else:
-            current_group.append(msg)
+            current_group.append(msg) # 把下一组消息的其余消息也放入新的消息组
 
-    if current_group:
-        groups.append(current_group)
+    if current_group: # 所有消息都遍历完 还没放入消息组
+        groups.append(current_group) # 所以需要放入消息组
 
     return groups
 
-
+# 历史会话的会话名显示
 def _get_group_display(group: list) -> str:
     """获取消息组的显示文本（以 HumanMessage 内容为代表）"""
     for msg in group:
@@ -203,7 +209,7 @@ def _get_group_display(group: list) -> str:
             return content
     return "(空消息组)"
 
-
+# 收集即将被压缩的消息的消息id组
 def _collect_ids_from_group(
     group_index: int, groups: list, mode: str = "edit"
 ) -> tuple[list[str], list[str]]:
@@ -220,17 +226,16 @@ def _collect_ids_from_group(
 
 class ChatREPL:
     def __init__(self):
-        # 工作目录路径
-        self.workplace_path: Path | None = None
-        self.model_config: dict = {}
-        self.yolo = False
-        self.agent = None
-        self.checkpointer = None
-        self.session_mgr: SessionManager | None = None
-        self.git_manager: GitManager | None = None
-        self.git = False
-        self._git_cp_count = 0
-        self._stop_requested = False
+        self.workplace_path: Path | None = None # 工作目录路径
+        self.model_config: dict = {}  # 模型参数
+        self.yolo = False  # Yolo模式
+        self.agent = None  # agent实例
+        self.checkpointer = None # 检查点实例
+        self.session_mgr: SessionManager | None = None # 会话管理器
+        self.git_manager: GitManager | None = None  # git管理器
+        self.git = False # git是否激活
+        self._git_cp_count = 0 # git提交数
+        self._stop_requested = False # 暂停agent的flag
         self._processing = False
         # 初始化 prompt-toolkit 会话（用于命令自动补全）
         self._prompt_session = None
@@ -272,10 +277,9 @@ class ChatREPL:
 
     async def initialize(self) -> bool:
         """初始化：加载配置、设置工作目录、构建 agent"""
-        ensure_config_dir()
+        ensure_config_dir() # 确保配置目录.chat存在
 
-        self.workplace_path = Path.cwd()
-        os.chdir(self.workplace_path)
+        self.workplace_path = Path.cwd() # 获取当前目录路径
 
         chat_dir = self.workplace_path / ".chat"
         chat_dir.mkdir(exist_ok=True)
@@ -298,12 +302,12 @@ class ChatREPL:
         # 构建 agent（可能较慢，放线程）
         console.print(
             "[dim cyan]"
-            " ██████╗  ██╗  ██╗   ██████╗   ██████╗   █████╗    ████████╗\n"
-            "██╔════╝  ██║  ██║  ██╔════╝  ██╔═══██╗  ██╔═██╗   ██╔═════╝\n"
-            "██║       ███████║  ██║       ██║   ██║  ██║  ██╗  ████████╗\n"
-            "██║       ██╔══██║  ██║       ██║   ██║  ██║ ██╔╝  ██╔═════╝\n"
-            "███████╗  ██║  ██║  ███████╗  ╚██████╔╝  █████╔╝   ████████╗\n"
-            " ╚═════╝  ╚═╝  ╚═╝   ╚═════╝   ╚═════╝   ╚════╝     ╚══════╝[/dim cyan]"
+            " ███████╗  ██╗   ██╗   ███████╗   ██████╗   █████╗     ████████╗\n"
+            "██╔═════╝  ██║   ██║  ██╔═════╝  ██╔═══██╗  ██╔══██╗   ██╔═════╝\n"
+            "██║        ████████║  ██║        ██║   ██║  ██║   ██╗  ████████╗\n"
+            "██║        ██╔═══██║  ██║        ██║   ██║  ██║  ██╔╝  ██╔═════╝\n"
+            "████████╗  ██║   ██║  ████████╗  ╚██████╔╝  █████╔═╝   ████████╗\n"
+            " ╚══════╝  ╚═╝   ╚═╝   ╚══════╝   ╚═════╝   ╚════╝      ╚══════╝[/dim cyan]"
         )
         self.agent = await asyncio.to_thread(
             build_agent,
@@ -1145,7 +1149,7 @@ class ChatREPL:
         for item in src.iterdir():
             if item.name.startswith("."):
                 continue
-            if item.stem.upper() in self.WINDOWS_RESERVED_NAMES:
+            if item.stem.lower() in self.WINDOWS_RESERVED_NAMES:
                 print(f"跳过 Windows 保留名: {item.name}")
                 continue
             dest_item = dst / item.name

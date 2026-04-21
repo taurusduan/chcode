@@ -1,12 +1,12 @@
 # ChCode
 
 ```
- ██████╗  ██╗  ██╗   ██████╗   ██████╗   █████╗    ████████╗
-██╔════╝  ██║  ██║  ██╔════╝  ██╔═══██╗  ██╔═██╗   ██╔═════╝
-██║       ███████║  ██║       ██║   ██║  ██║  ██╗  ████████╗
-██║       ██╔══██║  ██║       ██║   ██║  ██║ ██╔╝  ██╔═════╝
-███████╗  ██║  ██║  ███████╗  ╚██████╔╝  █████╔╝   ████████╗
- ╚═════╝  ╚═╝  ╚═╝   ╚═════╝   ╚═════╝   ╚════╝     ╚══════╝
+ ███████╗  ██╗   ██╗   ███████╗   ██████╗   █████╗     ████████╗
+██╔═════╝  ██║   ██║  ██╔═════╝  ██╔═══██╗  ██╔══██╗   ██╔═════╝
+██║        ████████║  ██║        ██║   ██║  ██║   ██╗  ████████╗
+██║        ██╔═══██║  ██║        ██║   ██║  ██║  ██╔╝  ██╔═════╝
+████████╗  ██║   ██║  ████████╗  ╚██████╔╝  █████╔═╝   ████████╗
+ ╚══════╝  ╚═╝   ╚═╝   ╚══════╝   ╚═════╝   ╚════╝      ╚══════╝
 ```
 
 Terminal-based AI coding agent, built with LangChain + Typer + Rich.
@@ -35,11 +35,12 @@ https://github.com/ScarletMercy/chcode/blob/main/assets/test.mp4
 - First-run wizard with **env auto-detection** (scans `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `ZHIPU_API_KEY`, etc.)
 - Create / edit / switch models at runtime
 - Per-model hyperparameter tuning (temperature, top_p, top_k, max_tokens, stop_sequences, etc.)
+- Automatic **retry with exponential backoff** (3/10/30/60s) and fallback model switching on persistent failure
 
 ### Session & History
 
 - **Persistent sessions** with SQLite-backed checkpoints (LangGraph)
-- Session list, switch, delete
+- Session list, switch, rename, delete
 - **Context compression** — auto-summarize when approaching token limit
 - Real-time **context usage display** in status bar
 
@@ -67,6 +68,11 @@ https://github.com/ScarletMercy/chcode/blob/main/assets/test.mp4
 - **Windows** — defaults to Git Bash, falls back to PowerShell
 - **Linux / Mac** — native bash/zsh
 - Persistent shell sessions with **automatic CWD tracking**
+
+### Observability
+
+- **LangSmith tracing** — toggle on/off via `/langsmith` command
+- Auto-disable tracing on 429 rate limit with user notification
 
 ### Skill System
 
@@ -152,6 +158,7 @@ On first launch, ChCode will:
 | `/mode` | Toggle Common / YOLO mode |
 | `/workdir` | Switch working directory |
 | `/tools` | List built-in tools |
+| `/langsmith` | Toggle LangSmith tracing |
 | `/skill` | Manage skills |
 | `/quit` | Exit |
 
@@ -174,7 +181,7 @@ ChCode intentionally does not integrate MCP (Model Context Protocol). The combin
 chcode/
 ├── cli.py                  # Typer CLI entry
 ├── chat.py                 # REPL main loop, slash commands, HITL
-├── agent_setup.py          # Agent construction, middleware chain
+├── agent_setup.py          # Agent construction, middleware, model retry with fallback
 ├── config.py               # Model config, Tavily, env detection
 ├── display.py              # Rich rendering, streaming, status bar
 ├── prompts.py              # Interactive prompts (select/confirm/text)

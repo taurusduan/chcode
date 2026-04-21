@@ -26,12 +26,12 @@ ENV_TO_CONFIG: dict[str, dict[str, str | list[str]]] = {
     "BIGMODEL_API_KEY": {
         "name": "智谱 GLM",
         "base_url": "https://open.bigmodel.cn/api/paas/v4",
-        "models": ["glm-4-plus", "glm-4-flash"],
+        "models": ["glm-4.7", "glm-5","glm-5-turbo","glm-5.1"],
     },
     "OPENAI_API_KEY": {
         "name": "OpenAI",
         "base_url": "https://api.openai.com/v1",
-        "models": ["gpt-4o", "gpt-4o-mini"],
+        "models": ["gpt-5.4", "gpt-5.3"],
     },
     "DEEPSEEK_API_KEY": {
         "name": "DeepSeek",
@@ -41,7 +41,7 @@ ENV_TO_CONFIG: dict[str, dict[str, str | list[str]]] = {
     "DASHSCOPE_API_KEY": {
         "name": "通义千问",
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "models": ["qwen-plus", "qwen-turbo"],
+        "models": ["qwen3.5-plus", "qwen-turbo"],
     },
     "ModelScopeToken": {
         "name": "ModelScope",
@@ -51,11 +51,11 @@ ENV_TO_CONFIG: dict[str, dict[str, str | list[str]]] = {
     "ANTHROPIC_API_KEY": {
         "name": "Anthropic Claude",
         "base_url": "https://api.anthropic.com/v1",
-        "models": ["claude-sonnet-4-20250514"],
+        "models": ["claude-sonnet-4.6"],
     },
 }
 
-
+# 确保.chat配置目录存在
 def ensure_config_dir() -> Path:
     CONFIG_DIR.mkdir(exist_ok=True)
     return CONFIG_DIR

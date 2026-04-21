@@ -653,7 +653,7 @@ async def list_dir(path: str, runtime: ToolRuntime[SkillAgentContext]) -> str:
     def _sync_list_dir() -> list[tuple[str, bool, int]]:
         entries = sorted(dir_path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
         result = []
-        for entry in entries[:100]:
+        for entry in entries:
             try:
                 is_dir = entry.is_dir()
                 size = entry.stat().st_size if not is_dir else 0
@@ -666,7 +666,7 @@ async def list_dir(path: str, runtime: ToolRuntime[SkillAgentContext]) -> str:
     entries = await loop.run_in_executor(None, _sync_list_dir)
 
     result_lines = []
-    for name, is_dir, size in entries:
+    for name, is_dir, size in entries[:100]:
         if is_dir:
             result_lines.append(f"{name}/")
         else:

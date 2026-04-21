@@ -132,7 +132,7 @@ def _robust_decode(data: bytes) -> str:
             return data.decode(enc, errors="strict")
         except (UnicodeDecodeError, LookupError):
             continue
-    return data.decode(system_encoding, errors="replace")
+    return data.decode(system_encoding, errors="replace")  # pragma: no cover
 
 
 def _kill_proc_tree(proc: subprocess.Popen) -> None:
