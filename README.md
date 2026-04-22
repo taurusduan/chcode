@@ -18,7 +18,7 @@ Terminal-based AI coding agent, built with LangChain + Typer + Rich.
 <img src="https://raw.githubusercontent.com/ScarletMercy/chcode/main/assets/chagent.png" alt="chagent prototype" width="600"/>
 </details>
 
-> 5000+ lines of Python, 13 built-in tools, full session persistence, git-aware workflow.
+> 6000+ lines of Python, 13 built-in tools, full session persistence, git-aware workflow.
 
 ![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)

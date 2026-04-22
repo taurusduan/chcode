@@ -987,7 +987,8 @@ class TestConfigureModelscope:
         """configure_modelscope() returns None when user cancels select."""
         from chcode.prompts import configure_modelscope
 
-        with patch("chcode.prompts.select", new_callable=AsyncMock, return_value=None):
+        with patch.dict(os.environ, {"ModelScopeToken": "fake-token"}), \
+             patch("chcode.prompts.select", new_callable=AsyncMock, return_value=None):
             result = await configure_modelscope()
 
         assert result is None

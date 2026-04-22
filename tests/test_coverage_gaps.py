@@ -1615,10 +1615,9 @@ class TestKillProcTreeImportError:
 
         import chcode.utils.shell.session as sess_mod
 
-        with patch.dict(sess_mod.__dict__, {"psutil": None}), \
-             patch("chcode.utils.shell.session.psutil", create=True), \
-             patch("os.killpg") as mock_killpg, \
-             patch("os.kill", side_effect=ProcessLookupError):
+        with patch.dict("sys.modules", {"psutil": None}), \
+             patch("chcode.utils.shell.session.os.name", "posix"), \
+             patch("os.killpg") as mock_killpg:
             sess_mod._kill_proc_tree(mock_proc)
 
         mock_killpg.assert_called_once_with(1234, signal.SIGKILL)

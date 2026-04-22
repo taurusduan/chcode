@@ -1,5 +1,5 @@
 """
-Skills 发现和加载器
+Skills 发现和加载器（ps: 自 https://github.com/NanmiCoder/skills-agent-proto 二次开发 ）
 
 演示 Skills 三层加载机制的核心实现：
 - Level 1: scan_skills() - 扫描并加载所有 Skills 元数据到 system prompt

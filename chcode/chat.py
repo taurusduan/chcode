@@ -325,6 +325,7 @@ class ChatREPL:
 
         return True
 
+    # 初始化命令历史
     def _init_readline_history(self):
         """初始化 readline 历史（跨会话保存）"""
         try:
@@ -338,6 +339,7 @@ class ChatREPL:
         except ImportError:
             pass
 
+    # 保存命令历史
     def _save_readline_history(self):
         """保存 readline 历史"""
         try:
