@@ -1620,7 +1620,7 @@ class TestKillProcTreeImportError:
              patch("os.killpg") as mock_killpg:
             sess_mod._kill_proc_tree(mock_proc)
 
-        mock_killpg.assert_called_once_with(1234, signal.SIGKILL)
+        mock_killpg.assert_called_once_with(1234, 9)
         mock_proc.kill.assert_not_called()
 
 
@@ -2464,23 +2464,23 @@ class TestKillProcTreeLinuxOsKillpg:
         mock_proc = MagicMock()
         mock_proc.pid = 1234
 
-        # Add os.killpg if it doesn't exist (Windows)
-        if not hasattr(os, "killpg"):
+        orig_killpg = getattr(os, "killpg", None)
+        orig_sigkill = getattr(signal, "SIGKILL", None)
+        if orig_killpg is None:
             os.killpg = lambda pgid, sig: None
-
-        if not hasattr(signal, "SIGKILL"):
-            signal.SIGKILL = 9
+        if orig_sigkill is None:
+            signal.SIGKILL = 9  # type: ignore[attr-defined]
 
         try:
             with patch.dict("sys.modules", {"psutil": None}):
                 with patch("chcode.utils.shell.session.os.killpg") as mock_kill:
                     _kill_proc_tree(mock_proc)
-                    # killpg should be called
                     assert mock_kill.called
         finally:
-            # Clean up if we added them
-            if "killpg" in dir(os):
-                pass  # Keep it for other tests
+            if orig_killpg is None and hasattr(os, "killpg"):
+                delattr(os, "killpg")
+            if orig_sigkill is None and hasattr(signal, "SIGKILL"):
+                delattr(signal, "SIGKILL")
 
 
 # ────────────────────────────────────────────────────────────────
