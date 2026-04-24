@@ -74,6 +74,7 @@ from chcode.agent_setup import (
 from chcode.skill_manager import manage_skills
 from chcode.utils.git_checker import check_git_availability
 from chcode.utils.git_manager import GitManager
+from chcode.utils.modelscope_ratelimit import get_ratelimit, is_modelscope_model
 
 
 # ─── 命令自动补全 ──────────────────────────────────────
@@ -467,7 +468,15 @@ class ChatREPL:
                 if wp:
                     parts.append(f"cwd: {wp}")
                 status = "  │  ".join(parts)
-                return HTML(f"<ansiblue>{sep}</ansiblue>\n{status}")
+                ratelimit_line = ""
+                if is_modelscope_model(self.model_config):
+                    rl = get_ratelimit()
+                    if rl:
+                        total = f"{rl['total_remaining']}/{rl['total_limit']}"
+                        model_name = self.model_config.get("model", "").split("/")[-1]
+                        model_rl = f"{rl['model_remaining']}/{rl['model_limit']}"
+                        ratelimit_line = f"\n<ansicyan>魔搭今日免费额度剩余: 全局 {total} │ 模型({model_name}) {model_rl}</ansicyan>"
+                return HTML(f"<ansiblue>{sep}</ansiblue>\n{status}{ratelimit_line}")
 
             self._prompt_session = PromptSession(
                 multiline=True,

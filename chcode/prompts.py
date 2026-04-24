@@ -160,14 +160,6 @@ MODELSCOPE_PRESETS = [
         "stream_usage": True,
     },
     {
-        "model": "ZhipuAI/GLM-4.7",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream_usage": True,
-        "extra_body": {"max_completion_tokens": 131072},
-    },
-    {
         "model": "ZhipuAI/GLM-5.1",
         "base_url": MODELSCOPE_BASE_URL,
         "temperature": 1.0,
@@ -196,6 +188,36 @@ MODELSCOPE_PRESETS = [
         "top_p": 0.95,
         "stream_usage": True,
     },
+    {
+        "model": "Qwen/Qwen3-Next-80B-A3B-Thinking",
+        "base_url": MODELSCOPE_BASE_URL,
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "stream_usage": True,
+        "extra_body": {"top_k": 20},
+    },
+    # {
+    #     "model": "MiniMax/MiniMax-M2.7",
+    #     "base_url": MODELSCOPE_BASE_URL,
+    #     "temperature": 1.0,
+    #     "top_p": 0.95,
+    #     "stream_usage": True,
+    #     "extra_body": {"top_k": 40},
+    # },
+    # {
+    #     "model": "deepseek-ai/DeepSeek-V4-Pro",
+    #     "base_url": MODELSCOPE_BASE_URL,
+    #     "temperature": 1.0,
+    #     "top_p": 1.0,
+    #     "stream_usage": True,
+    # },
+    # {
+    #     "model": "deepseek-ai/DeepSeek-V4-Flash",
+    #     "base_url": MODELSCOPE_BASE_URL,
+    #     "temperature": 1.0,
+    #     "top_p": 1.0,
+    #     "stream_usage": True,
+    # },
 ]
 
 API_KEY_ENV_VARS = [

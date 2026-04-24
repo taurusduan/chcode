@@ -29,6 +29,7 @@ from langgraph.types import Command
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from chcode.utils.enhanced_chat_openai import EnhancedChatOpenAI
+from chcode.utils.modelscope_ratelimit import is_modelscope_model, get_modelscope_clients
 from chcode.utils.skill_loader import SkillAgentContext
 from chcode.display import console
 from chcode.utils.tool_result_pipeline import (
@@ -221,7 +222,12 @@ async def load_model(
 ) -> ModelResponse:
     """动态加载模型"""
     model_config = request.runtime.context.model_config
-    return await handler(request.override(model=EnhancedChatOpenAI(**model_config)))
+    kwargs = dict(model_config)
+    if is_modelscope_model(model_config):
+        sync_client, async_client = get_modelscope_clients()
+        kwargs["http_client"] = sync_client
+        kwargs["http_async_client"] = async_client
+    return await handler(request.override(model=EnhancedChatOpenAI(**kwargs)))
 
 
 @wrap_model_call

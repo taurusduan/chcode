@@ -80,6 +80,11 @@ https://github.com/ScarletMercy/chcode/blob/main/assets/test.mp4
 - Skills are injected into system prompt via LangChain middleware
 - Supports project-level and global skill directories
 
+### ModelScope Rate Limit
+
+- Real-time **API quota display** in status bar (daily limit remaining, per-model remaining)
+- Auto-enabled when using ModelScope models
+
 ## Built-in Tools (14)
 
 | Tool | Description |
@@ -199,6 +204,7 @@ chcode/
     ├── enhanced_chat_openai.py  # Extended ChatOpenAI with reasoning support
     ├── git_manager.py      # Git checkpoint management
     ├── skill_loader.py     # Skill discovery and loading
+    ├── modelscope_ratelimit.py  # ModelScope API rate limit monitor
     └── tool_result_pipeline.py  # Output truncation and budget enforcement
 ```
 
