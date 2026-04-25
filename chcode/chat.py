@@ -1239,7 +1239,7 @@ class ChatREPL:
             )
 
             current_model = (self.model_config or {}).get("model", "")
-            if is_multimodal_model(current_model):
+            if self.workplace_path and is_multimodal_model(current_model):
                 media_paths = extract_media_paths(user_input, self.workplace_path)
                 if media_paths:
                     message = build_multimodal_message(user_input, media_paths)

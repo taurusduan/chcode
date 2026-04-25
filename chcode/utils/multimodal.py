@@ -66,6 +66,8 @@ _VIDEO_EXTS = frozenset({
 
 _ALL_MEDIA_EXTS = _IMAGE_EXTS | _VIDEO_EXTS
 
+_VIDEO_EXT_NAMES = frozenset(e.lstrip(".") for e in _VIDEO_EXTS)
+
 _MIME_MAP: dict[str, str] = {
     "jpg": "image/jpeg",
     "jpeg": "image/jpeg",
@@ -120,7 +122,7 @@ def encode_media_as_base64(
             f"(max {_MAX_MEDIA_SIZE / 1024 / 1024:.0f}MB)"
         )
 
-    is_video = ext in {e.lstrip(".") for e in _VIDEO_EXTS}
+    is_video = ext in _VIDEO_EXT_NAMES
 
     if is_video:
         with open(path, "rb") as f:

@@ -23,20 +23,23 @@ def get_ratelimit() -> dict:
 
 
 def is_modelscope_model(model_config: dict) -> bool:
-    return "modelscope" in model_config.get("base_url", "")
+    return "modelscope" in model_config.get("base_url", "").lower()
 
 
 def _update_ratelimit(headers: httpx.Headers) -> None:
     total_limit = headers.get("modelscope-ratelimit-requests-limit")
     if not total_limit:
         return
-    with _ratelimit_lock:
-        _ratelimit_data.update({
-            "total_limit": int(total_limit),
-            "total_remaining": int(headers.get("modelscope-ratelimit-requests-remaining", 0)),
-            "model_limit": int(headers.get("modelscope-ratelimit-model-requests-limit", 0)),
-            "model_remaining": int(headers.get("modelscope-ratelimit-model-requests-remaining", 0)),
-        })
+    try:
+        with _ratelimit_lock:
+            _ratelimit_data.update({
+                "total_limit": int(total_limit),
+                "total_remaining": int(headers.get("modelscope-ratelimit-requests-remaining", 0)),
+                "model_limit": int(headers.get("modelscope-ratelimit-model-requests-limit", 0)),
+                "model_remaining": int(headers.get("modelscope-ratelimit-model-requests-remaining", 0)),
+            })
+    except (ValueError, TypeError):
+        pass
 
 
 class _HeaderCaptureTransport(httpx.HTTPTransport):

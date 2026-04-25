@@ -279,6 +279,12 @@ async def _configure_modelscope_with_test() -> dict | None:
     console.print(f"[green]配置完成: {default['model']} (默认)[/green]")
     console.print(f"[dim]备用模型 ({len(ms_config['fallback'])} 个): {fallback_names}[/dim]")
 
+    # 魔搭配置完成后，自动同步视觉模型配置
+    from chcode.vision_config import auto_configure_vision
+    vision_default = auto_configure_vision()
+    if vision_default:
+        console.print(f"[dim]视觉模型已自动配置: {vision_default.get('model', '未知')}[/dim]")
+
     await configure_tavily()
     return default
 

@@ -30,6 +30,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from chcode.utils.enhanced_chat_openai import EnhancedChatOpenAI
 from chcode.utils.modelscope_ratelimit import is_modelscope_model, get_modelscope_clients
+from chcode.utils.multimodal import is_multimodal_model
 from chcode.utils.skill_loader import SkillAgentContext
 from chcode.display import console
 from chcode.utils.tool_result_pipeline import (
@@ -127,7 +128,6 @@ async def filter_vision_tool(
     if tool_name == "vision":
         model_config = request.runtime.context.model_config
         model_name = model_config.get("model", "")
-        from chcode.utils.multimodal import is_multimodal_model
 
         if is_multimodal_model(model_name):
             return ToolMessage(
@@ -176,8 +176,6 @@ async def load_skills(request: ModelRequest) -> str:
     os_name = sys.platform
     model_config = request.runtime.context.model_config
     model_name = model_config.get("model", "")
-
-    from chcode.utils.multimodal import is_multimodal_model
 
     native_vision = is_multimodal_model(model_name)
 
