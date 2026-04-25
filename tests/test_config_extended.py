@@ -188,8 +188,8 @@ class TestConfigureNewModel:
             assert data["default"]["model"] == "test-model"
 
     @pytest.mark.asyncio
-    async def test_second_config_goes_to_fallback(self, mock_config_dir):
-        """Test second configuration goes to fallback"""
+    async def test_second_config_becomes_default(self, mock_config_dir):
+        """Test second configuration becomes default, old default moves to fallback"""
         import chcode.config as mod
 
         # Setup existing default
@@ -201,7 +201,7 @@ class TestConfigureNewModel:
         )
 
         new_config = {
-            "model": "fallback-model",
+            "model": "new-model",
             "base_url": "https://api.test.com/v1",
             "api_key": "sk-test",
             "stream_usage": True,
@@ -219,12 +219,12 @@ class TestConfigureNewModel:
             result = await mod.configure_new_model()
 
             assert result is not None
-            assert result["model"] == "fallback-model"
+            assert result["model"] == "new-model"
 
-            # Verify it went to fallback
+            # New model becomes default, old default moves to fallback
             data = mod.load_model_json()
-            assert data["default"]["model"] == "default-model"
-            assert "fallback-model" in data["fallback"]
+            assert data["default"]["model"] == "new-model"
+            assert "default-model" in data["fallback"]
 
     @pytest.mark.asyncio
     async def test_user_cancels_form(self, mock_config_dir):

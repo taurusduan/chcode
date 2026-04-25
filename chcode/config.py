@@ -165,7 +165,15 @@ async def first_run_configure() -> dict | None:
                 console.print(f"[red]连接失败: {e}[/red]")
                 return None
 
-        data = {"default": config, "fallback": {}}
+        data = load_model_json()
+        old_default = data.get("default")
+        fallback = data.get("fallback", {})
+        if old_default:
+            old_name = old_default.get("model", "")
+            if old_name and old_name not in fallback:
+                fallback[old_name] = old_default
+        data["default"] = config
+        data["fallback"] = fallback
         save_model_json(data)
         console.print(f"[green]配置完成: {model}[/green]")
 
@@ -221,10 +229,12 @@ async def configure_new_model() -> dict | None:
         data["default"] = config
         data["fallback"] = {}
     else:
-        # 已有默认 — 新配置加入 fallback
-        if config["model"] not in fallback:
-            fallback[config["model"]] = config
-            data["fallback"] = fallback
+        # 已有默认 — 新模型设为默认，旧默认移到 fallback
+        old_name = old_default.get("model", "")
+        if old_name and old_name not in fallback:
+            fallback[old_name] = old_default
+        data["default"] = config
+        data["fallback"] = fallback
 
     save_model_json(data)
     console.print(f"[green]模型配置已保存: {config['model']}[/green]")
@@ -269,7 +279,7 @@ async def _configure_modelscope_with_test() -> dict | None:
         save_model_json(ms_config)
     else:
         # 已有配置 — 旧的 default 移入 fallback，魔搭作为新 default，合并 fallback
-        if old_default["model"] not in ms_config["fallback"]:
+        if old_default["model"] not in existing_fallback:
             existing_fallback[old_default["model"]] = old_default
         existing_fallback.update(ms_config["fallback"])
         data["default"] = ms_config["default"]
@@ -355,7 +365,7 @@ async def switch_model() -> dict | None:
         return None
 
     selected_config = fallback.pop(selected_name)
-    if default:
+    if default and current_name not in fallback:
         fallback[current_name] = default
 
     data["default"] = selected_config
