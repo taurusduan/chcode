@@ -912,7 +912,7 @@ class TestConfigureModelscope:
 
             data = mod.load_model_json()
             assert data["default"]["model"] == "ZhipuAI/GLM-5"
-            assert len(data["fallback"]) == 11
+            assert len(data["fallback"]) == 13
 
     @pytest.mark.asyncio
     async def test_modelscope_merge_existing(self, mock_config_dir):
@@ -980,7 +980,7 @@ class TestConfigureModelscope:
 
         assert result is not None
         assert result["default"]["api_key"] == "ms-test-key"
-        assert len(result["fallback"]) == 11
+        assert len(result["fallback"]) == 13
 
     @pytest.mark.asyncio
     async def test_configure_modelscope_cancel(self):

@@ -204,20 +204,20 @@ MODELSCOPE_PRESETS = [
     #     "stream_usage": True,
     #     "extra_body": {"top_k": 40},
     # },
-    # {
-    #     "model": "deepseek-ai/DeepSeek-V4-Pro",
-    #     "base_url": MODELSCOPE_BASE_URL,
-    #     "temperature": 1.0,
-    #     "top_p": 1.0,
-    #     "stream_usage": True,
-    # },
-    # {
-    #     "model": "deepseek-ai/DeepSeek-V4-Flash",
-    #     "base_url": MODELSCOPE_BASE_URL,
-    #     "temperature": 1.0,
-    #     "top_p": 1.0,
-    #     "stream_usage": True,
-    # },
+    {
+        "model": "deepseek-ai/DeepSeek-V4-Pro",
+        "base_url": MODELSCOPE_BASE_URL,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "stream_usage": True,
+    },
+    {
+        "model": "deepseek-ai/DeepSeek-V4-Flash",
+        "base_url": MODELSCOPE_BASE_URL,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "stream_usage": True,
+    },
 ]
 
 API_KEY_ENV_VARS = [
