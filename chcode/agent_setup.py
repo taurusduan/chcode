@@ -321,7 +321,9 @@ def build_agent(
     data = load_model_json()
     fallback = data.get("fallback", {})
     if fallback:
-        set_fallback_models(list(fallback.values()))
+        current_model = cfg.get("model", "")
+        filtered = [v for k, v in fallback.items() if v.get("model") != current_model]
+        set_fallback_models(filtered)
 
     # 摘要触发阈值 = 上下文窗口的 90%
     model_name = cfg.get("model", "")

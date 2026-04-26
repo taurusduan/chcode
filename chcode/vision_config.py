@@ -177,20 +177,49 @@ def auto_configure_vision() -> dict | None:
     """自动配置视觉模型（静默模式，不需要用户交互）。
 
     从环境变量或已配置的 ModelScope key 自动生成视觉配置。
+    与已有的视觉模型配置合并，不覆盖已有的默认模型。
     返回默认模型配置，失败返回 None。
     """
     api_key = _detect_modelscope_api_key()
     if not api_key:
         return None
 
-    # 已有配置且 key 相同则不重复写入
-    existing = get_vision_default_model()
-    if existing and existing.get("api_key") == api_key:
-        return existing
+    data = load_vision_json()
+    existing_default = data.get("default", {})
+    existing_fallback = data.get("fallback", {})
 
-    config = _build_vision_config(api_key)
-    save_vision_json(config)
-    return config["default"]
+    # 已有相同 key 的 ModelScope 默认配置则跳过
+    if (
+        existing_default.get("base_url") == MODELSCOPE_BASE_URL
+        and existing_default.get("api_key") == api_key
+    ):
+        return existing_default
+
+    # 已有其他提供商的默认视觉模型 → 只把 ModelScope 模型加入 fallback
+    if existing_default and existing_default.get("api_key"):
+        # 将 ModelScope 预设模型加入 fallback（去重）
+        for preset in VISION_MODEL_PRESETS:
+            cfg = dict(preset)
+            cfg["api_key"] = api_key
+            if cfg["model"] not in existing_fallback:
+                existing_fallback[cfg["model"]] = cfg
+        data["fallback"] = existing_fallback
+        save_vision_json(data)
+        return existing_default
+
+    # 没有默认视觉模型 → ModelScope 设为默认
+    new_default = dict(VISION_MODEL_PRESETS[0])
+    new_default["api_key"] = api_key
+    new_fallback = {}
+    for preset in VISION_MODEL_PRESETS[1:]:
+        cfg = dict(preset)
+        cfg["api_key"] = api_key
+        new_fallback[cfg["model"]] = cfg
+
+    data["default"] = new_default
+    data["fallback"] = {**existing_fallback, **new_fallback}
+    save_vision_json(data)
+    return data["default"]
 
 
 async def configure_vision_interactive() -> dict | None:

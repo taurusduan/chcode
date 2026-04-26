@@ -1573,9 +1573,6 @@ _VISION_SUPPORTED_EXTS = frozenset(
         ".webm",
     }
 )
-_VISION_MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
-
-
 @tool
 async def vision(
     image_path: str,
@@ -1610,17 +1607,6 @@ async def vision(
             f"vision:\n[FAILED] Unsupported image format: {path.suffix}\n"
             f"Supported formats: {', '.join(sorted(_VISION_SUPPORTED_EXTS))}"
         )
-
-    # 检查文件大小
-    try:  # pragma: no cover
-        file_size = path.stat().st_size  # pragma: no cover
-        if file_size > _VISION_MAX_IMAGE_SIZE:  # pragma: no cover
-            return (  # pragma: no cover
-                f"vision:\n[FAILED] Image too large: {file_size / 1024 / 1024:.1f}MB "  # pragma: no cover
-                f"(max {_VISION_MAX_IMAGE_SIZE / 1024 / 1024:.0f}MB)"  # pragma: no cover
-            )  # pragma: no cover
-    except OSError as e:  # pragma: no cover
-        return f"vision:\n[FAILED] Cannot read file: {e}"  # pragma: no cover
 
     # 读取并 base64 编码（使用共享工具函数）
     ext = path.suffix.lower().lstrip(".")

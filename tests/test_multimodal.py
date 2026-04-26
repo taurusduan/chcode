@@ -180,11 +180,11 @@ class TestEncodeMediaAsBase64:
         with pytest.raises(ValueError, match="Unsupported"):
             encode_media_as_base64(bad_file)
 
-    def test_file_too_large(self, tmp_path):
+    def test_video_too_large(self, tmp_path):
         from chcode.utils.multimodal import encode_media_as_base64
 
-        big_file = tmp_path / "big.png"
-        big_file.write_bytes(b"\x00" * (21 * 1024 * 1024))
+        big_file = tmp_path / "big.mp4"
+        big_file.write_bytes(b"\x00" * (15 * 1024 * 1024))
 
         with pytest.raises(ValueError, match="too large"):
             encode_media_as_base64(big_file)

@@ -81,18 +81,18 @@ from chcode.utils.modelscope_ratelimit import get_ratelimit, is_modelscope_model
 
 SLASH_COMMANDS = {
     "/new": "新会话",
+    "/history": "历史会话",
     "/model": "模型管理（新建/编辑/切换）",
     "/vision": "视觉模型配置",
-    "/skill": "技能管理",
-    "/history": "历史会话",
-    "/compress": "压缩会话",
-    "/git": "Git 状态",
-    "/search": "配置 Tavily 搜索 API Key",
-    "/mode": "切换 Common/Yolo 模式",
-    "/workdir": "切换工作目录",
-    "/tools": "显示内置工具",
-    "/langsmith": "LangSmith 追踪开关",
     "/messages": "管理历史消息（编辑/分叉/删除）",
+    "/compress": "压缩会话",
+    "/skill": "技能管理",
+    "/search": "配置 Tavily 搜索 API Key",
+    "/workdir": "切换工作目录",
+    "/mode": "切换 Common/Yolo 模式",
+    "/git": "Git 状态",
+    "/langsmith": "LangSmith 追踪开关",
+    "/tools": "显示内置工具",
     "/help": "显示帮助",
     "/quit": "退出",
 }
@@ -501,7 +501,7 @@ class ChatREPL:
                 buff = self._prompt_session.default_buffer
                 if buff.complete_state is not None:
                     n = len(buff.complete_state.completions)
-                    needed = min(n + 2, 16)
+                    needed = min(n + 2, 7)
                     return Dimension(min=needed, max=needed)
                 line_count = buff.text.count("\n") + 1
                 return Dimension(min=line_count, max=line_count)
@@ -952,18 +952,18 @@ class ChatREPL:
         table.add_column("说明")
         cmds = [
             ("/new", "新会话"),
+            ("/history", "历史会话"),
             ("/model", "模型管理（新建/编辑/切换）"),
             ("/vision", "视觉模型配置"),
-            ("/skill", "技能管理"),
-            ("/history", "历史会话"),
-            ("/compress", "压缩会话"),
-            ("/git", "Git 状态"),
-            ("/search", "配置 Tavily 搜索 API Key"),
-            ("/mode", "切换 Common/Yolo 模式"),
-            ("/workdir", "切换工作目录"),
-            ("/tools", "显示内置工具"),
-            ("/langsmith", "LangSmith 追踪开关"),
             ("/messages", "管理历史消息（编辑/分叉/删除）"),
+            ("/compress", "压缩会话"),
+            ("/skill", "技能管理"),
+            ("/search", "配置 Tavily 搜索 API Key"),
+            ("/workdir", "切换工作目录"),
+            ("/mode", "切换 Common/Yolo 模式"),
+            ("/git", "Git 状态"),
+            ("/langsmith", "LangSmith 追踪开关"),
+            ("/tools", "显示内置工具"),
             ("/help", "显示此帮助"),
             ("/quit", "退出"),
         ]
@@ -1194,6 +1194,75 @@ class ChatREPL:
                 self._render_status_bar()
                 return
 
+    async def _handle_agent_error(self, error: Exception) -> None:
+        """Agent 出错时：当前组无 AIMessage 则删除整组，否则保存错误消息"""
+        try:
+            state = await self.agent.aget_state(self.session_mgr.config)
+            messages: list[BaseMessage] = state.values.get("messages", [])
+
+            # 找到最后一组消息（以最后一个 HumanMessage 开头）
+            last_human_idx = -1
+            for i, msg in enumerate(messages):
+                if isinstance(msg, HumanMessage):
+                    last_human_idx = i
+
+            if last_human_idx >= 0:
+                current_group = messages[last_human_idx:]
+                has_ai = any(isinstance(m, AIMessage) for m in current_group)
+
+                if not has_ai:
+                    # 当前组没有 AIMessage，删除整组
+                    await self._delete_messages([m.id for m in current_group])
+                    return
+
+            # 有 AIMessage，按原逻辑保存错误消息
+            error_msg = AIMessage(
+                f"Agent 执行错误: {error}",
+                additional_kwargs={"error": True, "composed": True},
+            )
+            await self.agent.aupdate_state(
+                self.session_mgr.config,
+                {"messages": [error_msg]},
+                as_node="model",
+            )
+        except Exception:
+            pass
+
+    async def _handle_cancel(self, user_input: str) -> None:
+        """取消时：当前组无 AIMessage 则删除整组并回填输入框，否则追加停止消息"""
+        try:
+            state = await self.agent.aget_state(self.session_mgr.config)
+            messages: list[BaseMessage] = state.values.get("messages", [])
+
+            # 找到最后一组消息（以最后一个 HumanMessage 开头）
+            last_human_idx = -1
+            for i, msg in enumerate(messages):
+                if isinstance(msg, HumanMessage):
+                    last_human_idx = i
+
+            if last_human_idx >= 0:
+                current_group = messages[last_human_idx:]
+                has_ai = any(isinstance(m, AIMessage) for m in current_group)
+
+                if not has_ai:
+                    # 当前组没有 AIMessage，删除整组并回填输入框
+                    await self._delete_messages([m.id for m in current_group])
+                    self._interrupt_buffer = user_input.strip()
+                    return
+
+            # 有 AIMessage，追加一条停止消息
+            error_msg = AIMessage(
+                "该消息意外停止",
+                additional_kwargs={"error": True, "composed": True},
+            )
+            await self.agent.aupdate_state(
+                self.session_mgr.config,
+                {"messages": [error_msg]},
+                as_node="model",
+            )
+        except Exception:
+            pass
+
     async def _delete_messages(self, message_ids: list[str]) -> None:
         """删除指定消息"""
         if not self.agent or not self.session_mgr:
@@ -1320,8 +1389,7 @@ class ChatREPL:
                             interrupt_chunk = i
 
                 except asyncio.CancelledError:
-                    if user_input.strip():
-                        self._interrupt_buffer = user_input.strip()
+                    await self._handle_cancel(user_input)
                     console.print(Text("\n[已中断]", style="dim"), "\n")
                     break
                 except ModelSwitchError:
@@ -1339,41 +1407,28 @@ class ChatREPL:
                                 None,
                                 self.yolo,
                             )
-                            console.print("[green]已切换到备用模型，请重新发送请求[/green]")
+                            # 重建 context 以使用新模型配置
+                            skill_agent_context = SkillAgentContext(
+                                skill_loader=self._skill_loader,
+                                working_directory=self.workplace_path,
+                                model_config=self.model_config or INNER_MODEL_CONFIG,
+                                thread_id=self.session_mgr.thread_id,
+                            )
+                            console.print("[green]已切换到备用模型，自动重试中...[/green]")
+                            continue  # 用备用模型重试当前请求
                         except Exception as e:
                             render_error(f"切换模型失败: {e}")
                     else:
                         render_error("没有更多备用模型可用")
+                        await self._handle_agent_error(ModelSwitchError("所有模型均失败"))
                     break
                 except openai.APIError as e:
                     render_error(f"Agent 执行错误: {e}")
-                    try:
-                        error_msg = AIMessage(
-                            f"Agent 执行错误: {e}",
-                            additional_kwargs={"error": True, "composed": True},
-                        )
-                        await self.agent.aupdate_state(
-                            self.session_mgr.config,
-                            {"messages": [error_msg]},
-                            as_node="model",
-                        )
-                    except Exception:
-                        pass
+                    await self._handle_agent_error(e)
                     break
                 except Exception as e:
                     render_error(f"Agent 执行错误: {e}")
-                    try:
-                        error_msg = AIMessage(
-                            f"Agent 执行错误: {e}",
-                            additional_kwargs={"error": True, "composed": True},
-                        )
-                        await self.agent.aupdate_state(
-                            self.session_mgr.config,
-                            {"messages": [error_msg]},
-                            as_node="model",
-                        )
-                    except Exception:
-                        pass
+                    await self._handle_agent_error(e)
                     break
 
                 if self._stop_requested:

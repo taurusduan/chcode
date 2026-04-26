@@ -1823,6 +1823,12 @@ class TestChatREPLProcessInput:
             yield "messages", [AIMessageChunk(content="Hello")]
 
         repl.agent.astream = mock_astream
+        # _handle_cancel 需要 aget_state，当前组有 HumanMessage 无 AIMessage 会回填输入框
+        from langchain_core.messages import HumanMessage
+        repl.agent.aget_state = AsyncMock(
+            return_value=Mock(values={"messages": [HumanMessage("test", id="h1")]})
+        )
+        repl.agent.aupdate_state = AsyncMock()
 
         with patch("chcode.chat.console.print"):
             with patch("chcode.chat.asyncio.create_task"):
@@ -1982,10 +1988,15 @@ class TestChatREPLProcessInput:
         from chcode.agent_setup import ModelSwitchError
 
         # Must be an async generator so `async for` can iterate it
+        call_count = 0
+
         async def mock_astream(*args, **kwargs):
-            raise ModelSwitchError("Switch needed")
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ModelSwitchError("Switch needed")
             yield  # make it a generator
-            return  # never reached
+            return
 
         repl.agent.astream = mock_astream
 
@@ -1998,6 +2009,7 @@ class TestChatREPLProcessInput:
                             await repl._process_input("test")
 
                             assert repl.model_config["model"] == "fallback"
+                            assert call_count >= 1  # 至少调用了一次，触发切换
 
     @pytest.mark.asyncio
     async def test_process_input_model_switch_no_fallback(self):
@@ -2015,6 +2027,8 @@ class TestChatREPLProcessInput:
             raise ModelSwitchError("Switch needed")
 
         repl.agent.astream = mock_astream
+        # _handle_agent_error 需要 aget_state
+        repl.agent.aget_state = AsyncMock(return_value=Mock(values={"messages": []}))
 
         with patch("chcode.chat.get_fallback_model", return_value=None):
             with patch("chcode.chat.render_error") as mock_err:

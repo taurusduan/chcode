@@ -322,19 +322,23 @@ class TestAutoConfigureVision:
         assert mod.VISION_JSON.stat().st_mtime == old_mtime
 
     def test_overwrites_if_key_differs(self, mock_config_dir, monkeypatch):
-        """Should overwrite if existing key differs from env key."""
+        """When existing key differs, should NOT overwrite default, only add to fallback."""
         import chcode.vision_config as mod
 
         monkeypatch.setenv("ModelScopeToken", "new-key")
         mod.save_vision_json({
-            "default": {"model": "old-model", "api_key": "old-key"},
+            "default": {"model": "old-model", "api_key": "old-key", "base_url": "other"},
             "fallback": {}
         })
 
         result = mod.auto_configure_vision()
 
-        assert result["api_key"] == "new-key"
-        assert result["model"] == "moonshotai/Kimi-K2.5"
+        # 旧默认保留不覆盖
+        assert result["api_key"] == "old-key"
+        assert result["model"] == "old-model"
+        # ModelScope 预设模型应加入 fallback
+        data = mod.load_vision_json()
+        assert "moonshotai/Kimi-K2.5" in data["fallback"]
 
 
 class TestConfigureVisionInteractive:

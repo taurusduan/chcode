@@ -532,6 +532,8 @@ class TestProcessInputFallbackSwitchFailure:
             yield
 
         repl.agent.astream = mock_astream
+        # _handle_agent_error 需要 aget_state
+        repl.agent.aget_state = AsyncMock(return_value=Mock(values={"messages": []}))
 
         with patch("chcode.chat.get_fallback_model", return_value=None):
             with patch("chcode.chat.render_error") as mock_err:
@@ -557,6 +559,14 @@ class TestProcessInputOpenAIError:
         repl.session_mgr.thread_id = "test-thread"
         repl.workplace_path = Path("/tmp")
         repl.model_config = {"model": "gpt-4"}
+        repl.agent.aupdate_state = AsyncMock()
+        # _handle_agent_error 需要 aget_state，有 AIMessage 才会保存错误消息
+        repl.agent.aget_state = AsyncMock(
+            return_value=Mock(values={"messages": [
+                HumanMessage("test", id="h1"),
+                AIMessage("response", id="a1"),
+            ]})
+        )
         repl.agent.aupdate_state = AsyncMock()
 
         import openai
@@ -596,6 +606,12 @@ class TestProcessInputOpenAIError:
         repl.workplace_path = Path("/tmp")
         repl.model_config = {"model": "gpt-4"}
         repl.agent.aupdate_state = AsyncMock(side_effect=Exception("state update failed"))
+        repl.agent.aget_state = AsyncMock(
+            return_value=Mock(values={"messages": [
+                HumanMessage("test", id="h1"),
+                AIMessage("response", id="a1"),
+            ]})
+        )
 
         import openai
 
@@ -667,6 +683,12 @@ class TestProcessInputGeneralException:
         repl.workplace_path = Path("/tmp")
         repl.model_config = {"model": "gpt-4"}
         repl.agent.aupdate_state = AsyncMock()
+        repl.agent.aget_state = AsyncMock(
+            return_value=Mock(values={"messages": [
+                HumanMessage("test", id="h1"),
+                AIMessage("response", id="a1"),
+            ]})
+        )
 
         async def mock_astream(*args, **kwargs):
             raise ValueError("something went wrong")
@@ -695,6 +717,12 @@ class TestProcessInputGeneralException:
         repl.workplace_path = Path("/tmp")
         repl.model_config = {"model": "gpt-4"}
         repl.agent.aupdate_state = AsyncMock(side_effect=Exception("double fail"))
+        repl.agent.aget_state = AsyncMock(
+            return_value=Mock(values={"messages": [
+                HumanMessage("test", id="h1"),
+                AIMessage("response", id="a1"),
+            ]})
+        )
 
         async def mock_astream(*args, **kwargs):
             raise ValueError("original error")

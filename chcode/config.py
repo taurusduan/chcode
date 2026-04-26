@@ -13,7 +13,7 @@ from typing import Any
 from rich.console import Console
 from rich.panel import Panel
 
-from chcode.prompts import select, confirm, model_config_form, text
+from chcode.prompts import select, confirm, model_config_form, text, configure_longcat
 
 console = Console()
 
@@ -123,6 +123,7 @@ async def first_run_configure() -> dict | None:
     if detected:
         choices = [f"{d['name']} (检测到 {d['env_var']})" for d in detected]
         choices.append("魔搭快捷配置...")
+        choices.append("LongCat 快捷配置...")
         choices.append("手动配置...")
         choices.append("退出")
 
@@ -138,6 +139,9 @@ async def first_run_configure() -> dict | None:
 
         if "魔搭" in result:
             return await _configure_modelscope_with_test()
+
+        if "LongCat" in result:
+            return await _configure_longcat_with_test()
 
         idx = choices.index(result)
         chosen = detected[idx]
@@ -181,7 +185,7 @@ async def first_run_configure() -> dict | None:
         return config
     else:
         console.print("[yellow]未检测到环境变量中的 API Key[/yellow]")
-        choices = ["魔搭快捷配置...", "手动配置...", "退出"]
+        choices = ["魔搭快捷配置...", "LongCat 快捷配置...", "手动配置...", "退出"]
         result = await select("选择:", choices)
         if result is None or "退出" in result:
             console.print("[dim]提示: 在环境变量中设置 API Key 后重新运行，例如:[/dim]")
@@ -190,17 +194,21 @@ async def first_run_configure() -> dict | None:
             return None
         if "魔搭" in result:
             return await _configure_modelscope_with_test()
+        if "LongCat" in result:
+            return await _configure_longcat_with_test()
         return await configure_new_model()
 
 
 async def configure_new_model() -> dict | None:
     """新建模型配置（交互式表单）"""
     ensure_config_dir()
-    result = await select("配置方式:", ["魔搭快捷配置...", "手动配置..."])
+    result = await select("配置方式:", ["魔搭快捷配置...", "LongCat 快捷配置...", "手动配置..."])
     if result is None:
         return None
     if "魔搭" in result:
         return await _configure_modelscope_with_test()
+    if "LongCat" in result:
+        return await _configure_longcat_with_test()
     config = await model_config_form()
     if config is None:
         return None
@@ -294,6 +302,52 @@ async def _configure_modelscope_with_test() -> dict | None:
     vision_default = auto_configure_vision()
     if vision_default:
         console.print(f"[dim]视觉模型已自动配置: {vision_default.get('model', '未知')}[/dim]")
+
+    await configure_tavily()
+    return default
+
+
+async def _configure_longcat_with_test() -> dict | None:
+    """LongCat 快捷配置：收集 API Key → 测试连接 → 保存 4 个预定义模型。"""
+    lc_config = await configure_longcat()
+    if lc_config is None:
+        return None
+
+    default = lc_config["default"]
+
+    # 测试连接
+    console.print("[yellow]测试连接中...[/yellow]")
+    try:
+        from chcode.utils.enhanced_chat_openai import EnhancedChatOpenAI
+
+        model_inst = EnhancedChatOpenAI(**default)
+        await asyncio.to_thread(model_inst.invoke, "你好")
+    except Exception as e:
+        import traceback
+
+        err_msg = str(e)
+        if "null value for 'choices'" not in err_msg:
+            console.print(f"[red]连接测试失败: {err_msg}[/red]")
+            console.print(f"[dim]{traceback.format_exc()}[/dim]")
+            return None
+
+    # 合并到已有配置，保留非 LongCat 的已有模型
+    data = load_model_json()
+    old_default = data.get("default")
+    existing_fallback = data.get("fallback", {})
+
+    if not old_default:
+        save_model_json(lc_config)
+    else:
+        if old_default["model"] not in existing_fallback:
+            existing_fallback[old_default["model"]] = old_default
+        existing_fallback.update(lc_config["fallback"])
+        data["default"] = lc_config["default"]
+        data["fallback"] = existing_fallback
+        save_model_json(data)
+    fallback_names = ", ".join(lc_config["fallback"].keys())
+    console.print(f"[green]配置完成: {default['model']} (默认)[/green]")
+    console.print(f"[dim]备用模型 ({len(lc_config['fallback'])} 个): {fallback_names}[/dim]")
 
     await configure_tavily()
     return default
@@ -447,6 +501,10 @@ CONTEXT_WINDOW_SIZES: dict[str, int] = {
     "qwen3.5-plus": 1000000,
     "qwen3.6-plus": 1000000,
     "qwen": 256000,
+    "longcat-2.0-preview": 1000000,
+    "longcat-flash-chat": 262144,
+    "longcat-flash-thinking": 262144,
+    "longcat-flash-lite": 500000,
 }
 
 _DEFAULT_CONTEXT_WINDOW = 256000

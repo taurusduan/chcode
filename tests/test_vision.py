@@ -70,17 +70,26 @@ class TestVisionFileValidation:
             assert "Unsupported image format" in result
 
     @pytest.mark.asyncio
-    async def test_file_too_large(self, mock_runtime, tmp_path):
+    async def test_large_image_gets_compressed(self, mock_runtime, tmp_path):
+        """Large image should be compressed by encode_media_as_base64, not rejected by size."""
         from chcode.utils.tools import vision
 
+        # 创建一个真实的 PNG 文件
         img_path = tmp_path / "large.png"
-        img_path.write_bytes(b"x" * (21 * 1024 * 1024))
+        from PIL import Image
+        img = Image.new("RGB", (4000, 3000), color="red")
+        img.save(img_path, format="PNG")
 
         with patch("chcode.utils.tools.resolve_path") as mock_resolve:
             mock_resolve.return_value = img_path
-            result = await vision.coroutine("large.png", runtime=mock_runtime)
-            assert "[FAILED]" in result
-            assert "Image too large" in result
+            # Patch ainvoke to avoid real API call, just verify encoding works
+            with patch("chcode.utils.enhanced_chat_openai.EnhancedChatOpenAI") as mock_llm_cls:
+                mock_llm = AsyncMock()
+                mock_llm.ainvoke.return_value.content = "ok"
+                mock_llm_cls.return_value = mock_llm
+                result = await vision.coroutine("large.png", runtime=mock_runtime)
+                # 不应该被拒绝（没有大小限制），大图会压缩后正常处理
+                assert "[OK]" in result
 
 
 class TestVisionImageProcessing:

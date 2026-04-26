@@ -84,9 +84,6 @@ _MIME_MAP: dict[str, str] = {
     "webm": "video/webm",
 }
 
-_MAX_MEDIA_SIZE = 20 * 1024 * 1024  # 20MB
-
-
 # ─── Media encoding ────────────────────────────────────────────
 
 
@@ -115,16 +112,14 @@ def encode_media_as_base64(
 
     mime_type = _MIME_MAP.get(ext, "application/octet-stream")
 
-    file_size = path.stat().st_size
-    if file_size > _MAX_MEDIA_SIZE:
-        raise ValueError(
-            f"Media too large: {file_size / 1024 / 1024:.1f}MB "
-            f"(max {_MAX_MEDIA_SIZE / 1024 / 1024:.0f}MB)"
-        )
-
     is_video = ext in _VIDEO_EXT_NAMES
 
     if is_video:
+        file_size = path.stat().st_size
+        if file_size > 14.9 * 1024 * 1024:
+            raise ValueError(
+                f"Video too large: {file_size / 1024 / 1024:.1f}MB (max 14.9MB)"
+            )
         with open(path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
     else:
@@ -136,8 +131,21 @@ def encode_media_as_base64(
             scale = max_side / max(w, h)
             img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
 
+        # 分辨率缩放后，如果体积仍超过 5MB，逐步降低 JPEG quality 压缩到 5MB 以内
+        MAX_BYTES = 5 * 1024 * 1024
         buf = io.BytesIO()
         img.save(buf, format=img.format or "PNG")
+
+        if buf.tell() > MAX_BYTES:
+            if img.mode in ("RGBA", "P", "LA"):
+                img = img.convert("RGB")
+            for quality in range(85, 4, -15):
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=quality)
+                if buf.tell() <= MAX_BYTES:
+                    break
+            mime_type = "image/jpeg"
+
         b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
     return b64, mime_type

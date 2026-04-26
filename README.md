@@ -155,18 +155,18 @@ On first launch, ChCode will:
 | Command | Description |
 |---------|-------------|
 | `/new` | Start new session |
-| `/model` | Model management (new / edit / switch) |
-| `/messages` | Edit / fork / delete history messages |
 | `/history` | Browse and switch sessions |
-| `/compress` | Compress current session |
-| `/git` | Show git status |
-| `/search` | Configure Tavily API key |
-| `/mode` | Toggle Common / YOLO mode |
-| `/workdir` | Switch working directory |
-| `/tools` | List built-in tools |
-| `/langsmith` | Toggle LangSmith tracing |
-| `/skill` | Manage skills |
+| `/model` | Model management (new / edit / switch) |
 | `/vision` | Visual model configuration |
+| `/messages` | Edit / fork / delete history messages |
+| `/compress` | Compress current session |
+| `/skill` | Manage skills |
+| `/search` | Configure Tavily API key |
+| `/workdir` | Switch working directory |
+| `/mode` | Toggle Common / YOLO mode |
+| `/git` | Show git status |
+| `/langsmith` | Toggle LangSmith tracing |
+| `/tools` | List built-in tools |
 | `/quit` | Exit |
 
 ## Keybindings
