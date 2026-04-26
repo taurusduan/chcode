@@ -306,12 +306,12 @@ class TestAutoConfigureVision:
         assert mod.VISION_JSON.exists()
 
     def test_does_not_overwrite_same_key(self, mock_config_dir, monkeypatch):
-        """Should not write if existing key matches env key."""
+        """Should not write if existing key and base_url match."""
         import chcode.vision_config as mod
 
         monkeypatch.setenv("ModelScopeToken", "same-key")
         mod.save_vision_json({
-            "default": {"model": "keep-this", "api_key": "same-key"},
+            "default": {"model": "keep-this", "api_key": "same-key", "base_url": mod.MODELSCOPE_BASE_URL},
             "fallback": {}
         })
         old_mtime = mod.VISION_JSON.stat().st_mtime

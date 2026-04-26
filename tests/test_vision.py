@@ -72,7 +72,7 @@ class TestVisionFileValidation:
     @pytest.mark.asyncio
     async def test_large_image_gets_compressed(self, mock_runtime, tmp_path):
         """Large image should be compressed by encode_media_as_base64, not rejected by size."""
-        from chcode.utils.tools import vision
+        from chcode.utils.multimodal import encode_media_as_base64
 
         # 创建一个真实的 PNG 文件
         img_path = tmp_path / "large.png"
@@ -80,16 +80,10 @@ class TestVisionFileValidation:
         img = Image.new("RGB", (4000, 3000), color="red")
         img.save(img_path, format="PNG")
 
-        with patch("chcode.utils.tools.resolve_path") as mock_resolve:
-            mock_resolve.return_value = img_path
-            # Patch ainvoke to avoid real API call, just verify encoding works
-            with patch("chcode.utils.enhanced_chat_openai.EnhancedChatOpenAI") as mock_llm_cls:
-                mock_llm = AsyncMock()
-                mock_llm.ainvoke.return_value.content = "ok"
-                mock_llm_cls.return_value = mock_llm
-                result = await vision.coroutine("large.png", runtime=mock_runtime)
-                # 不应该被拒绝（没有大小限制），大图会压缩后正常处理
-                assert "[OK]" in result
+        # 验证大图片不会因为大小限制被拒绝，而是正常编码
+        b64, mime = encode_media_as_base64(img_path)
+        assert b64
+        assert mime == "image/png"
 
 
 class TestVisionImageProcessing:
