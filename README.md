@@ -23,19 +23,31 @@ Terminal-based AI coding agent, built with LangChain + Typer + Rich.
 ![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-## Demo
+[中文文档](README_zh.md)
 
-https://github.com/ScarletMercy/chcode/blob/main/assets/test.mp4
+<img src="https://raw.githubusercontent.com/ScarletMercy/chcode/main/assets/chcode.png" alt="ChCode main interface" width="800"/>
 
 ## Features
 
 ### Model Management
 
 - Compatible with **all OpenAI-compatible APIs** (OpenAI, DeepSeek, Qwen, GLM, Claude via proxy, etc.)
-- First-run wizard with **env auto-detection** (scans `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `ZHIPU_API_KEY`, etc.)
+- Built-in quick setup for **ModelScope**, **LongCat**, and major providers
+- **ModelScope**: 2000 free model calls/day
+- **LongCat**: 50M+ free tokens/day minimum
+- First-run wizard with **env auto-detection** (scans `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `ZHIPU_API_KEY`, `ModelScopeToken`, etc.)
+- Native **reasoning/thinking model** support — thinking tokens displayed in real time
 - Create / edit / switch models at runtime
 - Per-model hyperparameter tuning (temperature, top_p, top_k, max_completion_tokens, stop_sequences, etc.)
 - Automatic **retry with exponential backoff** (3/10/30/60s) and fallback model switching on persistent failure
+
+### Vision & Multimodal
+
+- Dedicated vision model configuration via `/vision` command (independent from main model)
+- Image analysis with **automatic media encoding** and base64 embedding
+- **Video support** — send videos directly to vision models for analysis (MP4, MOV, AVI, MKV, WebM)
+- Automatic image resizing for oversized inputs
+- Supported image formats: PNG, JPG, JPEG, GIF, BMP, WebP, TIFF
 
 ### Session & History
 
@@ -69,10 +81,24 @@ https://github.com/ScarletMercy/chcode/blob/main/assets/test.mp4
 - **Linux / Mac** — native bash/zsh
 - Persistent shell sessions with **automatic CWD tracking**
 
+### Rich Terminal UI
+
+- Real-time **status bar** — context usage %, git checkpoint count, ModelScope API quota
+- **Streaming output** with token-by-token rendering
+- Slash command auto-completion
+- Color-coded tool approval UI with **inline diff preview** for file edits
+
 ### Observability
 
 - **LangSmith tracing** — toggle on/off via `/langsmith` command
 - Auto-disable tracing on 429 rate limit with user notification
+
+### Sub-Agent System
+
+- Three built-in agent types: **Explore** (codebase search, read-only), **Plan** (architecture design), **General** (full-capability coding)
+- **Parallel execution** — launch multiple agents concurrently for independent tasks
+- Sub-agents run with **isolated context**, protecting the main conversation from context pollution
+- **Custom agents** — define your own agent types in `.chat/agents/` with dedicated tools and instructions
 
 ### Skill System
 
@@ -100,7 +126,7 @@ https://github.com/ScarletMercy/chcode/blob/main/assets/test.mp4
 | `web_fetch` | Fetch and convert URL content to markdown |
 | `web_search` | Web search via [Tavily](https://tavily.com) |
 | `ask_user` | Single-select, multi-select, batch questions for user interaction |
-| `agent` | Launch sub-agents (explore, plan, general-purpose), supports parallel execution |
+| `agent` | Launch sub-agents (explore, plan, general-purpose, custom), supports parallel execution |
 | `todo_write` | Structured task tracking for complex multi-step work |
 | `vision` | Analyze images and videos via ModelScope vision models |
 
