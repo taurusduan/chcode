@@ -410,11 +410,11 @@ class ChatREPL:
                     continue
 
                 # 正常对话
-                prev_tracing = os.environ.get("LANGCHAIN_TRACING", "false").lower()
+                prev_tracing = os.environ.get("LANGCHAIN_TRACING_V2", os.environ.get("LANGCHAIN_TRACING", "false")).lower()
                 await self._process_input(user_input)
 
                 # 检查 LangSmith 是否因 429 自动关闭
-                if prev_tracing == "true" and os.environ.get("LANGCHAIN_TRACING", "false").lower() != prev_tracing:
+                if prev_tracing == "true" and os.environ.get("LANGCHAIN_TRACING_V2", os.environ.get("LANGCHAIN_TRACING", "false")).lower() != prev_tracing:
                     self.langsmith_tracing = False
                     render_warning(
                         "LangSmith 追踪已因配额耗尽自动关闭 "
@@ -656,8 +656,8 @@ class ChatREPL:
         """将 LangSmith 实例变量同步到环境变量"""
         from chcode.config import LANGSMITH_ENDPOINT
 
-        os.environ["LANGCHAIN_TRACING"] = "true" if self.langsmith_tracing else "false"
-        os.environ.pop("LANGCHAIN_TRACING_V2", None)
+        os.environ.pop("LANGCHAIN_TRACING", None)
+        os.environ["LANGCHAIN_TRACING_V2"] = "true" if self.langsmith_tracing else "false"
         os.environ["LANGCHAIN_PROJECT"] = self.langsmith_project
         os.environ["LANGSMITH_API_KEY"] = self.langsmith_api_key
         os.environ["LANGCHAIN_ENDPOINT"] = LANGSMITH_ENDPOINT

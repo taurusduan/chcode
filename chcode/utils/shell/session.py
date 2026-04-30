@@ -58,6 +58,7 @@ class ShellSession:
                 stderr=subprocess.PIPE,
                 cwd=exec_cwd,
                 env=env,
+                start_new_session=os.name != "nt",
             )
         except FileNotFoundError:
             return (

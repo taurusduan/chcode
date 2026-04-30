@@ -54,6 +54,7 @@ class TestKillProcTree:
             _kill_proc_tree(mock_proc)
             mock_parent.kill.assert_called_once()
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="taskkill only available on Windows")
     def test_windows_no_psutil(self):
         from chcode.utils.shell.session import _kill_proc_tree
         mock_proc = MagicMock()

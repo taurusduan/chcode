@@ -589,7 +589,10 @@ LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 
 def load_langsmith_config() -> dict:
     """加载 LangSmith 配置（环境变量优先，其次 SETTING_JSON）"""
-    tracing_env = os.getenv("LANGCHAIN_TRACING", "")
+    # 优先读取 LANGCHAIN_TRACING_V2，兼容旧的 LANGCHAIN_TRACING
+    tracing_v2 = os.getenv("LANGCHAIN_TRACING_V2", "")
+    tracing_v1 = os.getenv("LANGCHAIN_TRACING", "")
+    tracing_env = tracing_v2 if tracing_v1 == "" else (tracing_v1 if tracing_v2 == "" else tracing_v2)
     tracing_explicit = tracing_env.lower() in ("true", "false")
     config = {
         "tracing": tracing_env.lower() == "true",
@@ -635,8 +638,8 @@ def save_langsmith_config(tracing: bool, project: str, api_key: str) -> None:
 
 def _apply_langsmith_env(tracing: bool, project: str, api_key: str) -> None:
     """将 LangSmith 配置写入环境变量"""
-    os.environ["LANGCHAIN_TRACING"] = "true" if tracing else "false"
-    os.environ.pop("LANGCHAIN_TRACING_V2", None)
+    os.environ.pop("LANGCHAIN_TRACING", None)
+    os.environ["LANGCHAIN_TRACING_V2"] = "true" if tracing else "false"
     os.environ["LANGCHAIN_PROJECT"] = project or ""
     os.environ["LANGSMITH_API_KEY"] = api_key or ""
     os.environ["LANGCHAIN_ENDPOINT"] = LANGSMITH_ENDPOINT
@@ -649,7 +652,10 @@ async def configure_langsmith() -> dict:
     env_project = os.getenv("LANGCHAIN_PROJECT", "")
     if env_key:
         project = env_project or "chcode"
-        tracing = os.getenv("LANGCHAIN_TRACING", "true").lower() == "true"
+        tracing_v2 = os.getenv("LANGCHAIN_TRACING_V2", "")
+        tracing_v1 = os.getenv("LANGCHAIN_TRACING", "true")
+        tracing_env = tracing_v2 if tracing_v2 != "" else tracing_v1
+        tracing = tracing_env.lower() == "true"
         _apply_langsmith_env(tracing, project, env_key)
         console.print("[dim]检测到 LANGSMITH_API_KEY 环境变量，已自动配置 LangSmith[/dim]")
         return {"tracing": tracing, "project": project, "api_key": env_key}

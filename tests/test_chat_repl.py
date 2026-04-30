@@ -163,13 +163,14 @@ class TestChatREPLInitialize:
                             with patch("chcode.chat.asyncio.to_thread", new_callable=AsyncMock) as mock_thread:
                                 mock_thread.return_value = Mock()
                                 with patch.object(repl, "_init_git", new_callable=AsyncMock):
-                                    result = await repl.initialize()
+                                    with patch("chcode.config.configure_langsmith", new_callable=AsyncMock, return_value={"tracing": False, "project": "", "api_key": ""}):
+                                        result = await repl.initialize()
 
-                                    assert result is True
-                                    assert repl.workplace_path == tmp_path
-                                    assert repl.model_config == {"model": "gpt-4"}
-                                    mock_cp.assert_called_once()
-                                    mock_thread.assert_called_once()
+                                        assert result is True
+                                        assert repl.workplace_path == tmp_path
+                                        assert repl.model_config == {"model": "gpt-4"}
+                                        mock_cp.assert_called_once()
+                                        mock_thread.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_initialize_first_run(self, tmp_path):
@@ -185,11 +186,12 @@ class TestChatREPLInitialize:
                                 mock_cp.return_value = Mock()
                                 with patch("chcode.chat.asyncio.to_thread", new_callable=AsyncMock):
                                     with patch.object(repl, "_init_git", new_callable=AsyncMock):
-                                        result = await repl.initialize()
+                                        with patch("chcode.config.configure_langsmith", new_callable=AsyncMock, return_value={"tracing": False, "project": "", "api_key": ""}):
+                                            result = await repl.initialize()
 
-                                        assert result is True
-                                        assert repl.model_config == {"model": "gpt-3.5"}
-                                        mock_frc.assert_called_once()
+                                            assert result is True
+                                            assert repl.model_config == {"model": "gpt-3.5"}
+                                            mock_frc.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_initialize_first_run_cancelled(self, tmp_path):
@@ -217,11 +219,12 @@ class TestChatREPLInitialize:
                         with patch("chcode.chat.create_checkpointer", new_callable=AsyncMock):
                             with patch("chcode.chat.asyncio.to_thread", new_callable=AsyncMock):
                                 with patch.object(repl, "_init_git", new_callable=AsyncMock):
-                                    await repl.initialize()
+                                    with patch("chcode.config.configure_langsmith", new_callable=AsyncMock, return_value={"tracing": False, "project": "", "api_key": ""}):
+                                        await repl.initialize()
 
-                                    assert (tmp_path / ".chat").exists()
-                                    assert (tmp_path / ".chat" / "sessions").exists()
-                                    assert (tmp_path / ".chat" / "skills").exists()
+                                        assert (tmp_path / ".chat").exists()
+                                        assert (tmp_path / ".chat" / "sessions").exists()
+                                        assert (tmp_path / ".chat" / "skills").exists()
 
 
 # ============================================================================
@@ -566,7 +569,7 @@ class TestChatREPLSlashCommands:
                 await repl._cmd_langsmith("")
 
                 assert repl.langsmith_tracing is True
-                assert os.environ.get("LANGCHAIN_TRACING") == "true"
+                assert os.environ.get("LANGCHAIN_TRACING_V2") == "true"
                 mock_save.assert_called_once()
                 mock_success.assert_called_once()
 
@@ -582,20 +585,20 @@ class TestChatREPLSlashCommands:
                 await repl._cmd_langsmith("")
 
                 assert repl.langsmith_tracing is False
-                assert os.environ.get("LANGCHAIN_TRACING") == "false"
+                assert os.environ.get("LANGCHAIN_TRACING_V2") == "false"
                 mock_save.assert_called_once()
                 mock_success.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_cmd_langsmith_cancel(self):
         repl = ChatREPL()
-        original = os.environ.get("LANGCHAIN_TRACING", "false")
+        original = os.environ.get("LANGCHAIN_TRACING_V2", "false")
 
         with patch("chcode.chat.select", new_callable=AsyncMock) as mock_sel:
             mock_sel.return_value = None
             await repl._cmd_langsmith("")
 
-            assert os.environ.get("LANGCHAIN_TRACING") == original
+            assert os.environ.get("LANGCHAIN_TRACING_V2") == original
 
     @pytest.mark.asyncio
     async def test_cmd_langsmith_edit_project(self):
@@ -667,7 +670,7 @@ class TestChatREPLSlashCommands:
 
         with patch.dict(os.environ, {}, clear=True):
             repl._sync_langsmith_env()
-            assert os.environ["LANGCHAIN_TRACING"] == "true"
+            assert os.environ["LANGCHAIN_TRACING_V2"] == "true"
             assert os.environ["LANGCHAIN_PROJECT"] == "test-proj"
             assert os.environ["LANGSMITH_API_KEY"] == "test-key"
             assert os.environ["LANGCHAIN_ENDPOINT"] == "https://api.smith.langchain.com"
@@ -679,7 +682,7 @@ class TestChatREPLSlashCommands:
 
         with patch.dict(os.environ, {}, clear=True):
             repl._sync_langsmith_env()
-            assert os.environ["LANGCHAIN_TRACING"] == "false"
+            assert os.environ["LANGCHAIN_TRACING_V2"] == "false"
 
         with patch("chcode.chat.console.print") as mock_print:
             with patch("chcode.utils.tools.ALL_TOOLS", []):
@@ -1853,10 +1856,10 @@ class TestChatREPLRun:
                 mock_input.side_effect = ["test", EOFError()]
                 with patch.object(repl, "_process_input", new_callable=AsyncMock) as mock_proc:
                     async def side_effect(msg):
-                        os.environ["LANGCHAIN_TRACING"] = "false"
+                        os.environ["LANGCHAIN_TRACING_V2"] = "false"
                     mock_proc.side_effect = side_effect
                     with patch("chcode.chat.render_warning") as mock_warn:
-                        with patch.dict(os.environ, {"LANGCHAIN_TRACING": "true"}):
+                        with patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"}, clear=False):
                             try:
                                 await repl.run()
                             except EOFError:

@@ -134,6 +134,7 @@ class TestLoadLangsmithConfig:
         monkeypatch.setenv("LANGSMITH_API_KEY", "lsv2_test_key")
         monkeypatch.setenv("LANGCHAIN_PROJECT", "my-proj")
         monkeypatch.setenv("LANGCHAIN_TRACING", "true")
+        monkeypatch.delenv("LANGCHAIN_TRACING_V2", raising=False)
 
         cfg = load_langsmith_config()
         assert cfg["api_key"] == "lsv2_test_key"
@@ -147,6 +148,7 @@ class TestLoadLangsmithConfig:
         monkeypatch.setenv("LANGSMITH_API_KEY", "lsv2_test_key")
         monkeypatch.delenv("LANGCHAIN_PROJECT", raising=False)
         monkeypatch.delenv("LANGCHAIN_TRACING", raising=False)
+        monkeypatch.delenv("LANGCHAIN_TRACING_V2", raising=False)
 
         cfg = load_langsmith_config()
         assert cfg["api_key"] == "lsv2_test_key"
@@ -166,6 +168,7 @@ class TestLoadLangsmithConfig:
         monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
         monkeypatch.delenv("LANGCHAIN_PROJECT", raising=False)
         monkeypatch.delenv("LANGCHAIN_TRACING", raising=False)
+        monkeypatch.delenv("LANGCHAIN_TRACING_V2", raising=False)
 
         cfg = load_langsmith_config()
         assert cfg["api_key"] == "lsv2_saved_key"
@@ -185,6 +188,7 @@ class TestLoadLangsmithConfig:
         monkeypatch.setenv("LANGSMITH_API_KEY", "new_key")
         monkeypatch.setenv("LANGCHAIN_PROJECT", "new-proj")
         monkeypatch.setenv("LANGCHAIN_TRACING", "true")
+        monkeypatch.delenv("LANGCHAIN_TRACING_V2", raising=False)
 
         cfg = load_langsmith_config()
         assert cfg["api_key"] == "new_key"
@@ -204,6 +208,7 @@ class TestLoadLangsmithConfig:
         monkeypatch.setenv("LANGSMITH_API_KEY", "lsv2_saved_key")
         monkeypatch.setenv("LANGCHAIN_PROJECT", "saved-proj")
         monkeypatch.setenv("LANGCHAIN_TRACING", "false")
+        monkeypatch.delenv("LANGCHAIN_TRACING_V2", raising=False)
 
         cfg = load_langsmith_config()
         assert cfg["tracing"] is False
@@ -215,6 +220,7 @@ class TestLoadLangsmithConfig:
         monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
         monkeypatch.delenv("LANGCHAIN_PROJECT", raising=False)
         monkeypatch.delenv("LANGCHAIN_TRACING", raising=False)
+        monkeypatch.delenv("LANGCHAIN_TRACING_V2", raising=False)
 
         cfg = load_langsmith_config()
         assert cfg["api_key"] == ""
@@ -253,20 +259,22 @@ class TestSaveLangsmithConfig:
 class TestApplyLangsmithEnv:
     def test_sets_all_env_vars(self, monkeypatch):
         monkeypatch.delenv("LANGCHAIN_TRACING", raising=False)
+        monkeypatch.delenv("LANGCHAIN_TRACING_V2", raising=False)
         monkeypatch.delenv("LANGCHAIN_PROJECT", raising=False)
         monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
         monkeypatch.delenv("LANGCHAIN_ENDPOINT", raising=False)
 
         _apply_langsmith_env(True, "my-proj", "lsv2_key")
 
-        assert os.environ["LANGCHAIN_TRACING"] == "true"
+        assert os.environ["LANGCHAIN_TRACING_V2"] == "true"
         assert os.environ["LANGCHAIN_PROJECT"] == "my-proj"
         assert os.environ["LANGSMITH_API_KEY"] == "lsv2_key"
         assert os.environ["LANGCHAIN_ENDPOINT"] == LANGSMITH_ENDPOINT
 
     def test_disabled(self, monkeypatch):
         monkeypatch.delenv("LANGCHAIN_TRACING", raising=False)
+        monkeypatch.delenv("LANGCHAIN_TRACING_V2", raising=False)
 
         _apply_langsmith_env(False, "", "")
 
-        assert os.environ["LANGCHAIN_TRACING"] == "false"
+        assert os.environ["LANGCHAIN_TRACING_V2"] == "false"
