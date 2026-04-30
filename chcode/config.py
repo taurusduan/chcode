@@ -84,6 +84,7 @@ def load_model_json() -> dict:
 def save_model_json(data: dict) -> None:
     global _model_json_cache
     content = json.dumps(data, indent=4, ensure_ascii=False)
+    ensure_config_dir()
     tmp = MODEL_JSON.with_suffix(".tmp")
     try:
         tmp.write_text(content, encoding="utf-8")
