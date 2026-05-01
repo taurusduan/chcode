@@ -688,12 +688,10 @@ class TestConfigureNewModelNullChoices:
             mock_form.return_value = config
             mock_model_inst = MagicMock()
             mock_model.return_value = mock_model_inst
-            # The "null value for 'choices'" error should be silently ignored
             mock_model_inst.invoke.side_effect = Exception("null value for 'choices'")
 
             result = await mod.configure_new_model()
 
-            # Should succeed because the error contains 'null value for choices'
             assert result is not None
             assert result["model"] == "test-model"
 
@@ -721,7 +719,6 @@ class TestConfigureNewModelNullChoices:
             result = await mod.configure_new_model()
 
             assert result is None
-            # Should have printed the error
             assert mock_console.print.called
 
 
@@ -756,7 +753,6 @@ class TestEditCurrentModelConnectionErrors:
             mock_model_inst.invoke.side_effect = Exception("null value for 'choices'")
 
             result = await mod.edit_current_model()
-            # Should succeed despite the error
             assert result is not None
             assert result["model"] == "new-model"
 

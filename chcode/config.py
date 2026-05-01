@@ -23,11 +23,11 @@ SETTING_JSON = CONFIG_DIR / "chagent.json"
 
 
 ENV_TO_CONFIG: dict[str, dict[str, str | list[str]]] = {
-    "BIGMODEL_API_KEY": {
-        "name": "智谱 GLM",
-        "base_url": "https://open.bigmodel.cn/api/paas/v4",
-        "models": ["glm-4.7", "glm-5","glm-5-turbo","glm-5.1"],
-    },
+    # "ZAI_API_KEY": {
+    #     "name": "智谱 GLM Coding Plan",
+    #     "base_url": "https://open.bigmodel.cn/api/coding/paas/v4 ",
+    #     "models": ["glm-4.7", "glm-5","glm-5-turbo","glm-5.1"],
+    # },  # 智谱官方coding plan暂不支持本编程工具
     "OPENAI_API_KEY": {
         "name": "OpenAI",
         "base_url": "https://api.openai.com/v1",
@@ -36,23 +36,23 @@ ENV_TO_CONFIG: dict[str, dict[str, str | list[str]]] = {
     "DEEPSEEK_API_KEY": {
         "name": "DeepSeek",
         "base_url": "https://api.deepseek.com/v1",
-        "models": ["deepseek-chat"],
+        "models": ["deepseek-v4-flash","deepseek-v4-pro","deepseek-r1-0528","deepseek-v3.2"],
     },
-    "DASHSCOPE_API_KEY": {
-        "name": "通义千问",
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "models": ["qwen3.5-plus", "qwen-turbo"],
+    "MINIMAX_TOKEN_PLAN_KEY":{
+        "name":"MiniMaxToken",
+        "base_url":"https://api.minimaxi.com/v1",
+        "models":["MiniMax-M2.7","MiniMax-M2.5","MiniMax-M2.1","MiniMax-M2","MiniMax-M2.7-highspeed","MiniMax-M2.5-highspeed","MiniMax-M2.1-highspeed"]
     },
-    "ModelScopeToken": {
-        "name": "ModelScope",
-        "base_url": "https://api-inference.modelscope.cn/v1",
-        "models": ["Qwen/Qwen3-235B-A22B-Thinking-2507"],
-    },
-    "ANTHROPIC_API_KEY": {
-        "name": "Anthropic Claude",
-        "base_url": "https://api.anthropic.com/v1",
-        "models": ["claude-sonnet-4.6"],
-    },
+    "KIMI_API_KEY":{
+        'name':"KimiCode",
+        "base_url":"https://api.kimi.com/coding/v1",
+        "models":["kimi-for-coding"]
+    }
+    # "DASHSCOPE_API_KEY": {
+    #     "name": "通义千问",
+    #     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    #     "models": ["qwen3.5-plus", "qwen-turbo"],
+    # },
 }
 
 # 确保.chat配置目录存在
@@ -271,21 +271,37 @@ async def _configure_modelscope_with_test() -> dict | None:
 
     default = ms_config["default"]
 
-    # 测试连接
+    # 测试连接（依次尝试 default + 2 个备用模型，应对速率限制）
     console.print("[yellow]测试连接中...[/yellow]")
-    try:
-        from chcode.utils.enhanced_chat_openai import EnhancedChatOpenAI
+    test_configs = [default]
+    for i, (_, cfg) in enumerate(ms_config["fallback"].items()):
+        if i >= 2:
+            break
+        test_configs.append(cfg)
 
-        model_inst = EnhancedChatOpenAI(**default)
-        await asyncio.to_thread(model_inst.invoke, "你好")
-    except Exception as e:
+    last_err = None
+    for tc in test_configs:
+        try:
+            from chcode.utils.enhanced_chat_openai import EnhancedChatOpenAI
+
+            model_inst = EnhancedChatOpenAI(**tc)
+            await asyncio.to_thread(model_inst.invoke, "你好")
+            last_err = None
+            break
+        except Exception as e:
+            err_msg = str(e)
+            if "null value" in err_msg:
+                last_err = None
+                break
+            last_err = e
+
+    if last_err is not None:
         import traceback
 
-        err_msg = str(e)
-        if "null value for 'choices'" not in err_msg:
-            console.print(f"[red]连接测试失败: {err_msg}[/red]")
-            console.print(f"[dim]{traceback.format_exc()}[/dim]")
-            return None
+        tb_str = "".join(traceback.format_exception(type(last_err), last_err, last_err.__traceback__))
+        console.print(f"[red]连接测试失败: {last_err}[/red]")
+        console.print(f"[dim]{tb_str}[/dim]")
+        return None
 
     # 合并到已有配置，保留非魔搭的已有模型
     data = load_model_json()
@@ -516,7 +532,7 @@ CONTEXT_WINDOW_SIZES: dict[str, int] = {
     "longcat-2.0-preview": 1000000,
     "longcat-flash-chat": 262144,
     "longcat-flash-thinking": 262144,
-    "longcat-flash-lite": 500000,
+    "longcat-flash-lite": 512000,
 }
 
 _DEFAULT_CONTEXT_WINDOW = 256000

@@ -51,7 +51,7 @@ class TestDetectEnvApiKeys:
 
 class TestEnvToConfig:
     def test_has_known_providers(self):
-        expected = {"BIGMODEL_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"}
+        expected = {"OPENAI_API_KEY", "DEEPSEEK_API_KEY", "MINIMAX_TOKEN_PLAN_KEY", "KIMI_API_KEY"}
         assert expected.issubset(set(ENV_TO_CONFIG.keys()))
 
     def test_each_entry_has_required_fields(self):
