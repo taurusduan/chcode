@@ -273,6 +273,14 @@ class ChatREPL:
 
     # ─── 清理 ────────────────────────────────────────
 
+    @staticmethod
+    def _ensure_chat_dir(workplace: Path) -> None:
+        """确保工作目录下 .chat/sessions 和 .chat/skills 子目录存在。"""
+        chat_dir = workplace / ".chat"
+        chat_dir.mkdir(exist_ok=True)
+        (chat_dir / "sessions").mkdir(exist_ok=True)
+        (chat_dir / "skills").mkdir(exist_ok=True)
+
     async def close(self) -> None:
         """关闭资源（aiosqlite 连接等）"""
         if self.checkpointer is not None:
@@ -290,10 +298,7 @@ class ChatREPL:
 
         self.workplace_path = Path.cwd() # 获取当前目录路径
 
-        chat_dir = self.workplace_path / ".chat"
-        chat_dir.mkdir(exist_ok=True)
-        (chat_dir / "sessions").mkdir(exist_ok=True)
-        (chat_dir / "skills").mkdir(exist_ok=True)
+        self._ensure_chat_dir(self.workplace_path)
 
         self.session_mgr = SessionManager(self.workplace_path)
 
@@ -989,10 +994,7 @@ class ChatREPL:
         save_workplace(self.workplace_path)
 
         # 重建子目录
-        chat_dir = self.workplace_path / ".chat"
-        chat_dir.mkdir(exist_ok=True)
-        (chat_dir / "sessions").mkdir(exist_ok=True)
-        (chat_dir / "skills").mkdir(exist_ok=True)
+        self._ensure_chat_dir(self.workplace_path)
 
         # 关闭旧 checkpointer 连接
         if self.checkpointer is not None:
@@ -1207,10 +1209,7 @@ class ChatREPL:
                 os.chdir(self.workplace_path)
                 save_workplace(self.workplace_path)
 
-                chat_dir = self.workplace_path / ".chat"
-                chat_dir.mkdir(exist_ok=True)
-                (chat_dir / "sessions").mkdir(exist_ok=True)
-                (chat_dir / "skills").mkdir(exist_ok=True)
+                self._ensure_chat_dir(self.workplace_path)
 
                 if old_path != new_path:
                     render_info("复制工作目录文件...")

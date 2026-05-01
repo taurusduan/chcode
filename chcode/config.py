@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +99,76 @@ def save_model_json(data: dict) -> None:
     _model_json_cache = None
 
 
+async def _test_connection(
+    config: dict, *, quiet: bool = False, brief: bool = False, return_error: bool = False
+) -> bool | str:
+    """测试模型连接，成功返回 True。
+
+    quiet=True 时不打印任何输出（用于重试循环）。
+    brief=True 时只打印简短错误（不输出 traceback）。
+    return_error=True 时，失败返回错误信息字符串而非 False。
+    """
+    if not quiet:
+        console.print("[yellow]测试连接中...[/yellow]")
+    try:
+        from chcode.utils.enhanced_chat_openai import EnhancedChatOpenAI
+
+        model = EnhancedChatOpenAI(**config)
+        await asyncio.to_thread(model.invoke, "你好")
+    except Exception as e:
+        err_msg = str(e)
+        if "null value" in err_msg:
+            return True
+        if not quiet:
+            console.print(f"[red]连接测试失败: {err_msg}[/red]")
+            if not brief:
+                console.print(f"[dim]{traceback.format_exc()}[/dim]")
+        if return_error:
+            return f"{err_msg}\n{traceback.format_exc()}"
+        return False
+    return True
+
+
+def _merge_and_save_config(
+    new_config: dict, fallback_updates: dict | None = None
+) -> None:
+    """将新配置合并到 model.json：old default → fallback，new_config → default。"""
+    data = load_model_json()
+    old_default = data.get("default")
+    fallback = data.get("fallback", {})
+
+    if old_default:
+        old_name = old_default.get("model", "")
+        if old_name and old_name not in fallback:
+            fallback[old_name] = old_default
+    if fallback_updates:
+        fallback.update(fallback_updates)
+
+    data["default"] = new_config
+    data["fallback"] = fallback
+    save_model_json(data)
+
+
+def _load_setting() -> dict:
+    """读取 SETTING_JSON，失败返回空 dict。"""
+    if SETTING_JSON.exists():
+        try:
+            return json.loads(SETTING_JSON.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _update_setting(**kwargs) -> None:
+    """更新 SETTING_JSON 中的指定字段。"""
+    ensure_config_dir()
+    data = _load_setting()
+    data.update(kwargs)
+    SETTING_JSON.write_text(
+        json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8"
+    )
+
+
 def get_default_model_config() -> dict | None:
     """获取当前默认模型配置"""
     data = load_model_json()
@@ -168,27 +239,10 @@ async def first_run_configure() -> dict | None:
             "stream_usage": True,
         }
 
-        console.print("[yellow]测试连接中...[/yellow]")
-        try:
-            from chcode.utils.enhanced_chat_openai import EnhancedChatOpenAI
+        if not await _test_connection(config, brief=True):
+            return None
 
-            model_inst = EnhancedChatOpenAI(**config)
-            await asyncio.to_thread(model_inst.invoke, "你好")
-        except Exception as e:
-            if "null value" not in str(e):
-                console.print(f"[red]连接失败: {e}[/red]")
-                return None
-
-        data = load_model_json()
-        old_default = data.get("default")
-        fallback = data.get("fallback", {})
-        if old_default:
-            old_name = old_default.get("model", "")
-            if old_name and old_name not in fallback:
-                fallback[old_name] = old_default
-        data["default"] = config
-        data["fallback"] = fallback
-        save_model_json(data)
+        _merge_and_save_config(config)
         console.print(f"[green]配置完成: {model}[/green]")
 
         await configure_tavily()
@@ -223,38 +277,10 @@ async def configure_new_model() -> dict | None:
     if config is None:
         return None
 
-    # 测试连接
-    console.print("[yellow]测试连接中...[/yellow]")
-    try:
-        from chcode.utils.enhanced_chat_openai import EnhancedChatOpenAI
+    if not await _test_connection(config):
+        return None
 
-        model = EnhancedChatOpenAI(**config)
-        await asyncio.to_thread(model.invoke, "你好")
-    except Exception as e:
-        import traceback
-
-        err_msg = str(e)
-        if "null value for 'choices'" not in err_msg:
-            console.print(f"[red]连接测试失败: {err_msg}[/red]")
-            console.print(f"[dim]{traceback.format_exc()}[/dim]")
-            return None
-    data = load_model_json()
-    old_default = data.get("default")
-    fallback = data.get("fallback", {})
-
-    if not old_default:
-        # 第一次配置 — 直接设为默认
-        data["default"] = config
-        data["fallback"] = {}
-    else:
-        # 已有默认 — 新模型设为默认，旧默认移到 fallback
-        old_name = old_default.get("model", "")
-        if old_name and old_name not in fallback:
-            fallback[old_name] = old_default
-        data["default"] = config
-        data["fallback"] = fallback
-
-    save_model_json(data)
+    _merge_and_save_config(config)
     console.print(f"[green]模型配置已保存: {config['model']}[/green]")
 
     await configure_tavily()
@@ -279,46 +305,23 @@ async def _configure_modelscope_with_test() -> dict | None:
             break
         test_configs.append(cfg)
 
-    last_err = None
+    connected = False
+    last_err_detail = None
     for tc in test_configs:
-        try:
-            from chcode.utils.enhanced_chat_openai import EnhancedChatOpenAI
-
-            model_inst = EnhancedChatOpenAI(**tc)
-            await asyncio.to_thread(model_inst.invoke, "你好")
-            last_err = None
+        result = await _test_connection(tc, quiet=True, return_error=True)
+        if result is True:
+            connected = True
             break
-        except Exception as e:
-            err_msg = str(e)
-            if "null value" in err_msg:
-                last_err = None
-                break
-            last_err = e
+        last_err_detail = result
 
-    if last_err is not None:
-        import traceback
-
-        tb_str = "".join(traceback.format_exception(type(last_err), last_err, last_err.__traceback__))
-        console.print(f"[red]连接测试失败: {last_err}[/red]")
-        console.print(f"[dim]{tb_str}[/dim]")
+    if not connected:
+        console.print(f"[red]连接测试失败: {last_err_detail.split(chr(10))[0] if last_err_detail else ''}[/red]")
+        if last_err_detail:
+            _, *tb_lines = last_err_detail.split("\n")
+            console.print(f"[dim]{chr(10).join(tb_lines)}[/dim]")
         return None
 
-    # 合并到已有配置，保留非魔搭的已有模型
-    data = load_model_json()
-    old_default = data.get("default")
-    existing_fallback = data.get("fallback", {})
-
-    if not old_default:
-        # 首次配置 — 魔搭直接作为完整配置
-        save_model_json(ms_config)
-    else:
-        # 已有配置 — 旧的 default 移入 fallback，魔搭作为新 default，合并 fallback
-        if old_default["model"] not in existing_fallback:
-            existing_fallback[old_default["model"]] = old_default
-        existing_fallback.update(ms_config["fallback"])
-        data["default"] = ms_config["default"]
-        data["fallback"] = existing_fallback
-        save_model_json(data)
+    _merge_and_save_config(default, fallback_updates=ms_config["fallback"])
     fallback_names = ", ".join(ms_config["fallback"].keys())
     console.print(f"[green]配置完成: {default['model']} (默认)[/green]")
     console.print(f"[dim]备用模型 ({len(ms_config['fallback'])} 个): {fallback_names}[/dim]")
@@ -341,36 +344,10 @@ async def _configure_longcat_with_test() -> dict | None:
 
     default = lc_config["default"]
 
-    # 测试连接
-    console.print("[yellow]测试连接中...[/yellow]")
-    try:
-        from chcode.utils.enhanced_chat_openai import EnhancedChatOpenAI
+    if not await _test_connection(default):
+        return None
 
-        model_inst = EnhancedChatOpenAI(**default)
-        await asyncio.to_thread(model_inst.invoke, "你好")
-    except Exception as e:
-        import traceback
-
-        err_msg = str(e)
-        if "null value for 'choices'" not in err_msg:
-            console.print(f"[red]连接测试失败: {err_msg}[/red]")
-            console.print(f"[dim]{traceback.format_exc()}[/dim]")
-            return None
-
-    # 合并到已有配置，保留非 LongCat 的已有模型
-    data = load_model_json()
-    old_default = data.get("default")
-    existing_fallback = data.get("fallback", {})
-
-    if not old_default:
-        save_model_json(lc_config)
-    else:
-        if old_default["model"] not in existing_fallback:
-            existing_fallback[old_default["model"]] = old_default
-        existing_fallback.update(lc_config["fallback"])
-        data["default"] = lc_config["default"]
-        data["fallback"] = existing_fallback
-        save_model_json(data)
+    _merge_and_save_config(default, fallback_updates=lc_config["fallback"])
     fallback_names = ", ".join(lc_config["fallback"].keys())
     console.print(f"[green]配置完成: {default['model']} (默认)[/green]")
     console.print(f"[dim]备用模型 ({len(lc_config['fallback'])} 个): {fallback_names}[/dim]")
@@ -391,21 +368,9 @@ async def edit_current_model() -> dict | None:
     if config is None:
         return None
 
-    # 测试连接
-    console.print("[yellow]测试连接中...[/yellow]")
-    try:
-        from chcode.utils.enhanced_chat_openai import EnhancedChatOpenAI
+    if not await _test_connection(config):
+        return None
 
-        model = EnhancedChatOpenAI(**config)
-        await asyncio.to_thread(model.invoke, "你好")
-    except Exception as e:
-        import traceback
-
-        err_msg = str(e)
-        if "null value for 'choices'" not in err_msg:
-            console.print(f"[red]连接测试失败: {err_msg}[/red]")
-            console.print(f"[dim]{traceback.format_exc()}[/dim]")
-            return None
     data["default"] = config
     save_model_json(data)
     console.print(f"[green]模型配置已更新: {config['model']}[/green]")
@@ -457,55 +422,24 @@ async def switch_model() -> dict | None:
 
 def load_workplace() -> Path | None:
     """加载上次的工作目录"""
-    if SETTING_JSON.exists():
-        try:
-            data = json.loads(SETTING_JSON.read_text(encoding="utf-8"))
-            wp = data.get("workplace_path", "")
-            if wp:
-                return Path(wp)
-        except Exception:
-            pass
-    return None
+    data = _load_setting()
+    wp = data.get("workplace_path", "")
+    return Path(wp) if wp else None
 
 
 def save_workplace(path: Path) -> None:
-    ensure_config_dir()
-    data = {}
-    if SETTING_JSON.exists():
-        try:
-            data = json.loads(SETTING_JSON.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    data["workplace_path"] = str(path)
-    SETTING_JSON.write_text(
-        json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8"
-    )
+    _update_setting(workplace_path=str(path))
 
 
 def load_tavily_api_key() -> str:
     """加载 Tavily API Key"""
-    if SETTING_JSON.exists():
-        try:
-            data = json.loads(SETTING_JSON.read_text(encoding="utf-8"))
-            return data.get("tavily_api_key", "")
-        except Exception:
-            pass
-    return os.getenv("TAVILY_API_KEY", "")
+    data = _load_setting()
+    return data.get("tavily_api_key", "") or os.getenv("TAVILY_API_KEY", "")
 
 
 def save_tavily_api_key(api_key: str) -> None:
     """保存 Tavily API Key"""
-    ensure_config_dir()
-    data = {}
-    if SETTING_JSON.exists():
-        try:
-            data = json.loads(SETTING_JSON.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    data["tavily_api_key"] = api_key
-    SETTING_JSON.write_text(
-        json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8"
-    )
+    _update_setting(tavily_api_key=api_key)
 
 
 # ─── 上下文窗口大小 ──────────────────────────────────────────
@@ -567,20 +501,16 @@ async def configure_tavily() -> None:
         console.print("[dim]检测到 TAVILY_API_KEY 环境变量，已自动配置 Tavily[/dim]")
         return
 
-    if SETTING_JSON.exists():
-        try:
-            data = json.loads(SETTING_JSON.read_text(encoding="utf-8"))
-            current = data.get("tavily_api_key", "")
-            if current:
-                from chcode.utils.tools import update_tavily_api_key
+    data = _load_setting()
+    current = data.get("tavily_api_key", "")
+    if current:
+        from chcode.utils.tools import update_tavily_api_key
 
-                update_tavily_api_key(current)
-                console.print(
-                    f"[dim]已配置 Tavily: {current[:6]}...{current[-4:]}[/dim]"
-                )
-                return
-        except Exception:
-            pass
+        update_tavily_api_key(current)
+        console.print(
+            f"[dim]已配置 Tavily: {current[:6]}...{current[-4:]}[/dim]"
+        )
+        return
 
     console.print()
     result = await select("是否配置 Tavily 搜索引擎?", ["是", "否"])
@@ -620,36 +550,24 @@ def load_langsmith_config() -> dict:
     if config["api_key"] and not config["project"]:
         config["project"] = "chcode"
     # 如果环境变量不完整，尝试从配置文件补充
-    if SETTING_JSON.exists():
-        try:
-            data = json.loads(SETTING_JSON.read_text(encoding="utf-8"))
-            if "langsmith_tracing" in data and not data.get("langsmith_api_key"):
-                return {"tracing": False, "project": "", "api_key": ""}
-            if not tracing_explicit and data.get("langsmith_tracing"):
-                config["tracing"] = bool(data["langsmith_tracing"])
-            if not config["project"]:
-                config["project"] = data.get("langsmith_project", "")
-            if not config["api_key"]:
-                config["api_key"] = data.get("langsmith_api_key", "")
-        except Exception:
-            pass
+    data = _load_setting()
+    if "langsmith_tracing" in data and not data.get("langsmith_api_key"):
+        return {"tracing": False, "project": "", "api_key": ""}
+    if not tracing_explicit and data.get("langsmith_tracing"):
+        config["tracing"] = bool(data["langsmith_tracing"])
+    if not config["project"]:
+        config["project"] = data.get("langsmith_project", "")
+    if not config["api_key"]:
+        config["api_key"] = data.get("langsmith_api_key", "")
     return config
 
 
 def save_langsmith_config(tracing: bool, project: str, api_key: str) -> None:
     """保存 LangSmith 配置到 SETTING_JSON"""
-    ensure_config_dir()
-    data = {}
-    if SETTING_JSON.exists():
-        try:
-            data = json.loads(SETTING_JSON.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    data["langsmith_tracing"] = tracing
-    data["langsmith_project"] = project
-    data["langsmith_api_key"] = api_key
-    SETTING_JSON.write_text(
-        json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8"
+    _update_setting(
+        langsmith_tracing=tracing,
+        langsmith_project=project,
+        langsmith_api_key=api_key,
     )
 
 
@@ -678,23 +596,19 @@ async def configure_langsmith() -> dict:
         return {"tracing": tracing, "project": project, "api_key": env_key}
 
     # 2. 配置文件已有
-    if SETTING_JSON.exists():
-        try:
-            data = json.loads(SETTING_JSON.read_text(encoding="utf-8"))
-            saved_project = data.get("langsmith_project", "")
-            saved_key = data.get("langsmith_api_key", "")
-            if saved_key and saved_project:
-                tracing = bool(data.get("langsmith_tracing", True))
-                _apply_langsmith_env(tracing, saved_project, saved_key)
-                masked = saved_key[:6] + "..." + saved_key[-4:] if len(saved_key) > 10 else "***"
-                console.print(
-                    f"[dim]已配置 LangSmith: 项目={saved_project}, Key={masked}[/dim]"
-                )
-                return {"tracing": tracing, "project": saved_project, "api_key": saved_key}
-            elif "langsmith_tracing" in data and not saved_key:
-                return {"tracing": False, "project": "", "api_key": ""}
-        except Exception:
-            pass
+    data = _load_setting()
+    saved_project = data.get("langsmith_project", "")
+    saved_key = data.get("langsmith_api_key", "")
+    if saved_key and saved_project:
+        tracing = bool(data.get("langsmith_tracing", True))
+        _apply_langsmith_env(tracing, saved_project, saved_key)
+        masked = saved_key[:6] + "..." + saved_key[-4:] if len(saved_key) > 10 else "***"
+        console.print(
+            f"[dim]已配置 LangSmith: 项目={saved_project}, Key={masked}[/dim]"
+        )
+        return {"tracing": tracing, "project": saved_project, "api_key": saved_key}
+    elif "langsmith_tracing" in data and not saved_key:
+        return {"tracing": False, "project": "", "api_key": ""}
 
     # 3. 引导配置
     console.print()
