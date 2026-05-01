@@ -21,34 +21,6 @@ def mock_config_dir(tmp_path: Path, monkeypatch):
     return config_dir
 
 
-class TestEnsureConfigDir:
-    """Tests for ensure_config_dir()."""
-
-    def test_creates_dir_if_not_exists(self, tmp_path: Path, monkeypatch):
-        """Directory should be created if it doesn't exist."""
-        import chcode.vision_config as mod
-
-        config_dir = tmp_path / ".chat"
-        monkeypatch.setattr(mod, "CONFIG_DIR", config_dir)
-        assert not config_dir.exists()
-
-        result = mod.ensure_config_dir()
-
-        assert config_dir.exists()
-        assert result == config_dir
-
-    def test_returns_config_dir_if_exists(self, tmp_path: Path, monkeypatch):
-        """Should return CONFIG_DIR if it already exists."""
-        import chcode.vision_config as mod
-
-        config_dir = tmp_path / ".chat"
-        config_dir.mkdir()
-        monkeypatch.setattr(mod, "CONFIG_DIR", config_dir)
-
-        result = mod.ensure_config_dir()
-
-        assert result == config_dir
-
 
 class TestLoadVisionJson:
     """Tests for load_vision_json()."""

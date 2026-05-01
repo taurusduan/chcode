@@ -290,6 +290,15 @@ class ChatREPL:
                 pass
             self.checkpointer = None
 
+    async def _close_checkpointer(self) -> None:
+        """安全关闭 checkpointer 连接"""
+        if self.checkpointer is not None:
+            try:
+                await self.checkpointer.conn.close()
+            except Exception:
+                pass
+            self.checkpointer = None
+
     # ─── 初始化 ────────────────────────────────────────
 
     async def initialize(self) -> bool:
@@ -997,12 +1006,7 @@ class ChatREPL:
         self._ensure_chat_dir(self.workplace_path)
 
         # 关闭旧 checkpointer 连接
-        if self.checkpointer is not None:
-            try:
-                await self.checkpointer.conn.close()
-            except Exception:
-                pass
-            self.checkpointer = None
+        await self._close_checkpointer()
 
         # 重建会话和 agent
         self.session_mgr = SessionManager(self.workplace_path)
@@ -1236,12 +1240,7 @@ class ChatREPL:
                         return
 
                 # 关闭旧 checkpointer 连接
-                if self.checkpointer is not None:
-                    try:
-                        await self.checkpointer.conn.close()
-                    except Exception:
-                        pass
-                    self.checkpointer = None
+                await self._close_checkpointer()
 
                 self.session_mgr = SessionManager(self.workplace_path)
                 db_path = self.workplace_path / ".chat" / "sessions" / "checkpointer.db"

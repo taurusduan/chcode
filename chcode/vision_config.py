@@ -10,86 +10,34 @@ from __future__ import annotations
 import copy
 import json
 import os
-from pathlib import Path
 
 from rich.console import Console
 
+from chcode.config import CONFIG_DIR, ensure_config_dir
 from chcode.prompts import select, confirm, password
 
 console = Console()
 
-CONFIG_DIR = Path.home() / ".chat"
 VISION_JSON = CONFIG_DIR / "vision_model.json"
 
 MODELSCOPE_BASE_URL = "https://api-inference.modelscope.cn/v1"
 
-# 视觉模型预设（默认 + 备用）
-VISION_MODEL_PRESETS = [
-    # 默认模型
-    {
-        "model": "moonshotai/Kimi-K2.5",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream_usage": True,
-    },
-    # 备用模型
-    {
-        "model": "Qwen/Qwen3-VL-235B-A22B-Instruct",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream_usage": True,
-    },
-    {
-        "model": "Qwen/Qwen3-VL-30B-A3B-Instruct",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream_usage": True,
-    },
-    {
-        "model": "Qwen/Qwen3-VL-8B-Instruct",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream_usage": True,
-    },
-    # 非视觉多模态模型（也支持图片输入）
-    {
-        "model": "Qwen/Qwen3.5-122B-A10B",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream_usage": True,
-    },
-    {
-        "model": "Qwen/Qwen3.5-397B-A17B",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream_usage": True,
-    },
-    {
-        "model": "Qwen/Qwen3.5-35B-A3B",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream_usage": True,
-    },
-    {
-        "model": "Qwen/Qwen3.5-27B",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream_usage": True,
-    },
+# 视觉模型预设 — 参数全部相同，只需列出模型名
+_VISION_MODEL_NAMES = [
+    "moonshotai/Kimi-K2.5",
+    "Qwen/Qwen3-VL-235B-A22B-Instruct",
+    "Qwen/Qwen3-VL-30B-A3B-Instruct",
+    "Qwen/Qwen3-VL-8B-Instruct",
+    "Qwen/Qwen3.5-122B-A10B",
+    "Qwen/Qwen3.5-397B-A17B",
+    "Qwen/Qwen3.5-35B-A3B",
+    "Qwen/Qwen3.5-27B",
 ]
 
-
-def ensure_config_dir() -> Path:
-    CONFIG_DIR.mkdir(exist_ok=True)
-    return CONFIG_DIR
+VISION_MODEL_PRESETS = [
+    {"model": name, "base_url": MODELSCOPE_BASE_URL, "temperature": 1.0, "top_p": 0.95, "stream_usage": True}
+    for name in _VISION_MODEL_NAMES
+]
 
 
 _vision_json_cache: tuple[float, dict] | None = None

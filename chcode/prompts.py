@@ -106,119 +106,27 @@ BASE_URL_PRESETS = [
 
 MODELSCOPE_BASE_URL = "https://api-inference.modelscope.cn/v1"
 
+# 每个模型只需声明差异字段，base_url / stream_usage 由生成器统一填充
+_MODELSCOPE_MODELS: list[dict] = [
+    {"model": "ZhipuAI/GLM-5", "temperature": 1.0, "top_p": 0.95},
+    {"model": "Qwen/Qwen3-235B-A22B-Thinking-2507", "temperature": 0.6, "top_p": 0.95, "extra_body": {"top_k": 20}},
+    {"model": "Qwen/Qwen3-235B-A22B-Instruct-2507", "temperature": 0.7, "top_p": 0.8, "extra_body": {"top_k": 20}},
+    {"model": "Qwen/Qwen3.5-397B-A17B", "temperature": 0.6, "top_p": 0.95, "extra_body": {"top_k": 20, "repetition_penalty": 1.0}},
+    {"model": "deepseek-ai/DeepSeek-V3.2", "temperature": 1.0, "top_p": 0.95},
+    {"model": "MiniMax/MiniMax-M2.5", "temperature": 1.0, "top_p": 0.95, "extra_body": {"top_k": 40}},
+    {"model": "moonshotai/Kimi-K2.5", "temperature": 1.0, "top_p": 0.95},
+    {"model": "ZhipuAI/GLM-5.1", "temperature": 1.0, "top_p": 0.95},
+    {"model": "Qwen/Qwen3-Coder-480B-A35B-Instruct", "temperature": 0.7, "top_p": 0.8, "extra_body": {"top_k": 20, "repetition_penalty": 1.05}},
+    {"model": "XiaomiMiMo/MiMo-V2-Flash", "temperature": 0.3, "top_p": 0.95},
+    {"model": "deepseek-ai/DeepSeek-R1-0528", "temperature": 0.6, "top_p": 0.95},
+    {"model": "Qwen/Qwen3-Next-80B-A3B-Thinking", "temperature": 0.6, "top_p": 0.95, "extra_body": {"top_k": 20}},
+    {"model": "deepseek-ai/DeepSeek-V4-Pro", "temperature": 1.0, "top_p": 1.0},
+    {"model": "deepseek-ai/DeepSeek-V4-Flash", "temperature": 1.0, "top_p": 1.0},
+]
+
 MODELSCOPE_PRESETS = [
-    {
-        "model": "ZhipuAI/GLM-5",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream_usage": True,
-    },
-    {
-        "model": "Qwen/Qwen3-235B-A22B-Thinking-2507",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "stream_usage": True,
-        "extra_body": {"top_k": 20},
-    },
-    {
-        "model": "Qwen/Qwen3-235B-A22B-Instruct-2507",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 0.7,
-        "top_p": 0.8,
-        "stream_usage": True,
-        "extra_body": {"top_k": 20},
-    },
-    {
-        "model": "Qwen/Qwen3.5-397B-A17B",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "stream_usage": True,
-        "extra_body": {"top_k": 20, "repetition_penalty": 1.0},
-    },
-    {
-        "model": "deepseek-ai/DeepSeek-V3.2",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream_usage": True,
-    },
-    {
-        "model": "MiniMax/MiniMax-M2.5",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream_usage": True,
-        "extra_body": {"top_k": 40},
-    },
-    {
-        "model": "moonshotai/Kimi-K2.5",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream_usage": True,
-    },
-    {
-        "model": "ZhipuAI/GLM-5.1",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 0.95,
-        "stream_usage": True,
-    },
-    {
-        "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 0.7,
-        "top_p": 0.8,
-        "stream_usage": True,
-        "extra_body": {"top_k": 20, "repetition_penalty": 1.05},
-    },
-    {
-        "model": "XiaomiMiMo/MiMo-V2-Flash",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 0.3,
-        "top_p": 0.95,
-        "stream_usage": True,
-    },
-    {
-        "model": "deepseek-ai/DeepSeek-R1-0528",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "stream_usage": True,
-    },
-    {
-        "model": "Qwen/Qwen3-Next-80B-A3B-Thinking",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "stream_usage": True,
-        "extra_body": {"top_k": 20},
-    },
-    # {
-    #     "model": "MiniMax/MiniMax-M2.7",
-    #     "base_url": MODELSCOPE_BASE_URL,
-    #     "temperature": 1.0,
-    #     "top_p": 0.95,
-    #     "stream_usage": True,
-    #     "extra_body": {"top_k": 40},
-    # },
-    {
-        "model": "deepseek-ai/DeepSeek-V4-Pro",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 1.0,
-        "stream_usage": True,
-    },
-    {
-        "model": "deepseek-ai/DeepSeek-V4-Flash",
-        "base_url": MODELSCOPE_BASE_URL,
-        "temperature": 1.0,
-        "top_p": 1.0,
-        "stream_usage": True,
-    },
+    {"base_url": MODELSCOPE_BASE_URL, "stream_usage": True, **spec}
+    for spec in _MODELSCOPE_MODELS
 ]
 
 API_KEY_ENV_VARS = [
