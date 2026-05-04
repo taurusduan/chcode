@@ -130,7 +130,10 @@ class GitManager:
     def _has_cross_session_conflict(
         self, aim_id: str, all_ids: list[str], checkpointer_dict: dict
     ) -> bool:
-        """检查回滚到 aim_id 是否会破坏其他会话的 checkpoint"""
+        """检查回滚到 aim_id 是否会破坏其他会话的 checkpoint。
+        aim_id 可以是 'hash' 或 'hash~1' 格式。"""
+        target = aim_id.removesuffix("~1")
+
         other_session_hashes = set()
         for k, v in checkpointer_dict.items():
             if k == "init":
@@ -145,10 +148,10 @@ class GitManager:
         head_result = self._run(["rev-parse", "HEAD"])
         if head_result.returncode != 0:
             return False
-        if head_result.stdout.strip() == aim_id.removesuffix("~1"):
+        if head_result.stdout.strip() == target:
             return False
 
-        log_result = self._run(["rev-list", f"{aim_id}..HEAD"])
+        log_result = self._run(["rev-list", f"{target}..HEAD"])
         if log_result.returncode != 0:
             return False
 
@@ -227,6 +230,7 @@ class GitManager:
 
         # -- 第二步：模糊匹配 --
         before_keys, at_or_after_keys = _classify_checkpoint_keys()
+        original_dict = dict(checkpointer_dict)
 
         has_before = len(before_keys) > 0
         has_after = len(at_or_after_keys) > 0
@@ -256,8 +260,8 @@ class GitManager:
 
         count = len(checkpointer_dict)
 
-        # 跨会话冲突检查（在 git reset 之前）
-        if self._has_cross_session_conflict(aim_id, all_ids, checkpointer_dict):
+        # 跨会话冲突检查（在 git reset 之前，用原始 dict 快照）
+        if self._has_cross_session_conflict(aim_id, all_ids, original_dict):
             return "cross_session_blocked"
 
         try:

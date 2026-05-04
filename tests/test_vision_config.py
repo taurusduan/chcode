@@ -256,7 +256,7 @@ class TestAutoConfigureVision:
     """Tests for auto_configure_vision()."""
 
     def test_returns_none_when_no_api_key(self, mock_config_dir, monkeypatch):
-        """Should return None if no ModelScope key is available."""
+        """Should return None if no API key is available."""
         import chcode.vision_config as mod
 
         monkeypatch.delenv("ModelScopeToken", raising=False)

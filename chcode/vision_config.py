@@ -130,51 +130,69 @@ def _build_vision_config(api_key: str) -> dict:
     return {"default": default_cfg, "fallback": fallback}
 
 
+def _detect_api_keys() -> list[tuple[str, list[dict]]]:
+    """检测所有可用 API Key，返回 [(api_key, matching_presets), ...]。
+
+    每个元素对应一个提供商，api_key 只会匹配同 base_url 的预设。
+    """
+    results: list[tuple[str, list[dict]]] = []
+
+    ms_key = _detect_modelscope_api_key()
+    if ms_key:
+        ms_presets = [p for p in VISION_MODEL_PRESETS if p["base_url"] == MODELSCOPE_BASE_URL]
+        if ms_presets:
+            results.append((ms_key, ms_presets))
+
+    return results
+
+
 def auto_configure_vision() -> dict | None:
     """自动配置视觉模型（静默模式，不需要用户交互）。
 
-    从环境变量或已配置的 ModelScope key 自动生成视觉配置。
+    从环境变量或已配置的 API Key 自动生成视觉配置。
     与已有的视觉模型配置合并，不覆盖已有的默认模型。
     返回默认模型配置，失败返回 None。
     """
-    api_key = _detect_modelscope_api_key()
-    if not api_key:
+    key_groups = _detect_api_keys()
+    if not key_groups:
         return None
 
     data = copy.deepcopy(load_vision_json())
     existing_default = data.get("default", {})
-    existing_fallback = data.get("fallback", {})
+    existing_fallback: dict = dict(data.get("fallback", {}))
+    changed = False
 
-    # 已有相同 key 的 ModelScope 默认配置则跳过
-    if (
-        existing_default.get("base_url") == MODELSCOPE_BASE_URL
-        and existing_default.get("api_key") == api_key
-    ):
-        return existing_default
+    for api_key, presets in key_groups:
+        # 已有相同 key 的相同提供商默认配置则跳过
+        if (
+            existing_default.get("base_url") == presets[0]["base_url"]
+            and existing_default.get("api_key") == api_key
+        ):
+            continue
 
-    # 已有其他提供商的默认视觉模型 → 只把 ModelScope 模型加入 fallback
-    if existing_default and existing_default.get("api_key"):
-        # 将 ModelScope 预设模型加入 fallback（去重）
-        for preset in VISION_MODEL_PRESETS:
+        for preset in presets:
             cfg = dict(preset)
             cfg["api_key"] = api_key
-            if cfg["model"] not in existing_fallback:
-                existing_fallback[cfg["model"]] = cfg
-        data["fallback"] = existing_fallback
-        save_vision_json(data)
+            model = cfg["model"]
+            # 已在 fallback 或是当前默认 → 跳过
+            if model in existing_fallback:
+                continue
+            if existing_default.get("model") == model and existing_default.get("api_key") == api_key:
+                continue
+            existing_fallback[model] = cfg
+            changed = True
+
+        # 没有默认视觉模型 → 用当前提供商的第一个预设设为默认
+        if not (existing_default and existing_default.get("api_key")):
+            existing_default = dict(presets[0])
+            existing_default["api_key"] = api_key
+            changed = True
+
+    if not changed:
         return existing_default
 
-    # 没有默认视觉模型 → ModelScope 设为默认
-    new_default = dict(VISION_MODEL_PRESETS[0])
-    new_default["api_key"] = api_key
-    new_fallback = {}
-    for preset in VISION_MODEL_PRESETS[1:]:
-        cfg = dict(preset)
-        cfg["api_key"] = api_key
-        new_fallback[cfg["model"]] = cfg
-
-    data["default"] = new_default
-    data["fallback"] = {**existing_fallback, **new_fallback}
+    data["default"] = existing_default
+    data["fallback"] = existing_fallback
     save_vision_json(data)
     return data["default"]
 
@@ -253,7 +271,12 @@ async def _configure_vision_wizard() -> dict | None:
         cfg["api_key"] = api_key
         fallback[model_name] = cfg
 
-    config = {"default": default_cfg, "fallback": fallback}
+    # 合并已有配置（保留其他提供商的 fallback）
+    existing_data = load_vision_json()
+    existing_fallback = existing_data.get("fallback", {})
+    merged_fallback = {**existing_fallback, **fallback}
+
+    config = {"default": default_cfg, "fallback": merged_fallback}
     save_vision_json(config)
 
     console.print(f"[green]视觉模型配置完成: {default_choice} (默认)[/green]")
