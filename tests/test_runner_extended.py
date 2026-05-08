@@ -178,3 +178,80 @@ class TestRunSubagent:
             result, is_error = await run_subagent("task", mock_def, {"model": "gpt-4"}, Path("/w"), MagicMock(), timeout_seconds=300)
         assert "part1" in result and "part2" in result
         assert is_error is False
+
+
+class TestRestrictBash:
+    """Tests for _restrict_bash middleware"""
+
+    @pytest.mark.asyncio
+    async def test_blocks_rm_rf(self):
+        from chcode.agents.runner import _restrict_bash
+        req = MagicMock()
+        req.tool_call = {"name": "bash", "args": {"command": "rm -rf /"}, "id": "tc1"}
+        result = await _restrict_bash.awrap_tool_call(req, AsyncMock())
+        assert result.status == "error"
+        assert "Blocked" in result.content
+
+    @pytest.mark.asyncio
+    async def test_blocks_mkdir(self):
+        from chcode.agents.runner import _restrict_bash
+        req = MagicMock()
+        req.tool_call = {"name": "bash", "args": {"command": "mkdir foo"}, "id": "tc1"}
+        result = await _restrict_bash.awrap_tool_call(req, AsyncMock())
+        assert result.status == "error"
+
+    @pytest.mark.asyncio
+    async def test_allows_safe_command(self):
+        from chcode.agents.runner import _restrict_bash
+        handler = AsyncMock(return_value=MagicMock())
+        req = MagicMock()
+        req.tool_call = {"name": "bash", "args": {"command": "ls -la"}, "id": "tc1"}
+        result = await _restrict_bash.awrap_tool_call(req, handler)
+        handler.assert_called_once_with(req)
+
+    @pytest.mark.asyncio
+    async def test_ignores_non_bash(self):
+        from chcode.agents.runner import _restrict_bash
+        handler = AsyncMock(return_value=MagicMock())
+        req = MagicMock()
+        req.tool_call = {"name": "read_file", "args": {"file_path": "/tmp/test"}, "id": "tc1"}
+        result = await _restrict_bash.awrap_tool_call(req, handler)
+        handler.assert_called_once_with(req)
+
+    @pytest.mark.asyncio
+    async def test_blocks_git_push(self):
+        from chcode.agents.runner import _restrict_bash
+        req = MagicMock()
+        req.tool_call = {"name": "bash", "args": {"command": "git push origin main"}, "id": "tc1"}
+        result = await _restrict_bash.awrap_tool_call(req, AsyncMock())
+        assert result.status == "error"
+
+
+class TestRunSubagentYoloParam:
+    """Tests for run_subagent yolo parameter"""
+
+    @pytest.mark.asyncio
+    async def test_yolo_passed_to_context(self):
+        from chcode.agents.runner import run_subagent
+
+        mock_def = AgentDefinition(
+            agent_type="test", when_to_use="test",
+            system_prompt="prompt", read_only=True, tools=None,
+            disallowed_tools=[], model=None,
+        )
+        mock_msg = MagicMock()
+        mock_msg.type = "ai"
+        mock_msg.content = [{"type": "text", "text": "result"}]
+        mock_agent = MagicMock()
+        mock_agent.ainvoke = AsyncMock(return_value={"messages": [mock_msg]})
+
+        captured_ctx = {}
+
+        def capture_create(model, tools, middleware, context_schema=None, checkpointer=None, **kw):
+            # Capture the context passed to the agent
+            return mock_agent
+
+        with patch("chcode.agents.runner.create_agent", side_effect=capture_create), \
+             patch("chcode.agents.runner._resolve_tools", return_value=[]), \
+             patch("chcode.agents.runner.EnhancedChatOpenAI", MagicMock()):
+            await run_subagent("task", mock_def, {"model": "gpt-4"}, Path("/w"), MagicMock(), timeout_seconds=300, yolo=True)

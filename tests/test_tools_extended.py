@@ -2471,3 +2471,28 @@ class TestAskUserSingleSelect:
                 {"question": "Pick one", "options": ["A", "B", "C"], "is_multiple": False}
             )
         assert "Option A" in result
+
+
+class TestUpdateAgentToolDesc:
+    """Tests for update_agent_tool_desc()"""
+
+    def test_normal_mode_desc(self):
+        from chcode.utils.tools import agent, update_agent_tool_desc
+        update_agent_tool_desc(False)
+        assert "general-purpose" not in agent.__doc__
+        assert "Explore" in agent.__doc__
+        assert "Plan" in agent.__doc__
+
+    def test_yolo_mode_desc(self):
+        from chcode.utils.tools import agent, update_agent_tool_desc
+        update_agent_tool_desc(True)
+        assert "general-purpose" in agent.__doc__
+        assert "Explore" in agent.__doc__
+        assert "Plan" in agent.__doc__
+
+    def test_toggle_back_and_forth(self):
+        from chcode.utils.tools import agent, update_agent_tool_desc
+        update_agent_tool_desc(True)
+        assert "general-purpose" in agent.__doc__
+        update_agent_tool_desc(False)
+        assert "general-purpose" not in agent.__doc__

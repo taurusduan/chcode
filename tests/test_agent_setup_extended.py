@@ -260,3 +260,56 @@ class TestUpdateSummarizationModel:
             assert fake.api_key == "new-key"
         finally:
             mod._summarization_model = old
+
+
+class TestRestrictAgentType:
+    """Tests for restrict_agent_type middleware"""
+
+    @pytest.mark.asyncio
+    async def test_downgrades_general_purpose_in_common_mode(self):
+        from chcode.agent_setup import restrict_agent_type
+        from langchain.tools.tool_node import ToolCallRequest
+        handler = AsyncMock(return_value=MagicMock())
+        req = MagicMock()
+        req.tool_call = {"name": "agent", "args": {"subagent_type": "general-purpose"}, "id": "tc1"}
+
+        with patch("chcode.agent_setup._hitl_middleware") as mock_hitl:
+            mock_hitl.interrupt_on = {"bash": {}}
+            await restrict_agent_type.awrap_tool_call(req, handler)
+
+        assert req.tool_call["args"]["subagent_type"] == "Explore"
+
+    @pytest.mark.asyncio
+    async def test_allows_general_purpose_in_yolo_mode(self):
+        from chcode.agent_setup import restrict_agent_type
+        handler = AsyncMock(return_value=MagicMock())
+        req = MagicMock()
+        req.tool_call = {"name": "agent", "args": {"subagent_type": "general-purpose"}, "id": "tc1"}
+
+        with patch("chcode.agent_setup._hitl_middleware") as mock_hitl:
+            mock_hitl.interrupt_on = {}
+            await restrict_agent_type.awrap_tool_call(req, handler)
+
+        assert req.tool_call["args"]["subagent_type"] == "general-purpose"
+
+    @pytest.mark.asyncio
+    async def test_allows_explore_in_common_mode(self):
+        from chcode.agent_setup import restrict_agent_type
+        handler = AsyncMock(return_value=MagicMock())
+        req = MagicMock()
+        req.tool_call = {"name": "agent", "args": {"subagent_type": "Explore"}, "id": "tc1"}
+
+        with patch("chcode.agent_setup._hitl_middleware") as mock_hitl:
+            mock_hitl.interrupt_on = {"bash": {}}
+            await restrict_agent_type.awrap_tool_call(req, handler)
+
+        assert req.tool_call["args"]["subagent_type"] == "Explore"
+
+    @pytest.mark.asyncio
+    async def test_ignores_non_agent_tool(self):
+        from chcode.agent_setup import restrict_agent_type
+        handler = AsyncMock(return_value=MagicMock())
+        req = MagicMock()
+        req.tool_call = {"name": "bash", "args": {"command": "ls"}, "id": "tc1"}
+        await restrict_agent_type.awrap_tool_call(req, handler)
+        handler.assert_called_once_with(req)

@@ -18,7 +18,7 @@ Terminal-based AI coding agent, built with LangChain + Typer + Rich.
 <img src="https://raw.githubusercontent.com/ScarletMercy/chcode/main/assets/chagent.png" alt="chagent prototype" width="600"/>
 </details>
 
-> 6000+ lines of Python, 14 built-in tools, full session persistence, git-aware workflow.
+> 7000+ lines of Python, 14 built-in tools, full session persistence, git-aware workflow.
 
 ![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -65,9 +65,10 @@ Terminal-based AI coding agent, built with LangChain + Typer + Rich.
 
 ### Human-in-the-Loop
 
-- **Common mode** — every tool call requires approval, with diff preview for edits
-- **YOLO mode** — auto-approve everything
+- **Common mode** — every tool call requires approval, with diff preview for edits. Only Explore and Plan sub-agents available.
+- **YOLO mode** — auto-approve everything. All sub-agents available including General-purpose.
 - Toggle with `Tab` key or `/mode` command
+- Available sub-agents update dynamically when switching modes
 
 ### Work Environment Isolation
 
@@ -95,9 +96,11 @@ Terminal-based AI coding agent, built with LangChain + Typer + Rich.
 
 ### Sub-Agent System
 
-- Three built-in agent types: **Explore** (codebase search, read-only), **Plan** (architecture design), **General** (full-capability coding)
-- **Parallel execution** — launch multiple agents concurrently for independent tasks
+- Three built-in agent types: **Explore** (codebase search, read-only), **Plan** (architecture design, read-only), **General-purpose** (full-capability coding)
+- **Mode-aware availability** — Common mode: Explore + Plan only; YOLO mode: all three + custom agents
+- **Parallel execution** — launch multiple agents concurrently for independent tasks, with live spinner progress display
 - Sub-agents run with **isolated context**, protecting the main conversation from context pollution
+- Read-only agents (Explore, Plan) have **bash command restrictions** to prevent accidental modifications
 - **Custom agents** — define your own agent types in `.chat/agents/` with dedicated tools and instructions
 
 ### Skill System
@@ -126,7 +129,7 @@ Terminal-based AI coding agent, built with LangChain + Typer + Rich.
 | `web_fetch` | Fetch and convert URL content to markdown |
 | `web_search` | Web search via [Tavily](https://tavily.com) |
 | `ask_user` | Single-select, multi-select, batch questions for user interaction |
-| `agent` | Launch sub-agents (explore, plan, general-purpose, custom), supports parallel execution |
+| `agent` | Launch sub-agents (Explore, Plan, General-purpose in YOLO mode, custom), supports parallel execution |
 | `todo_write` | Structured task tracking for complex multi-step work |
 | `vision` | Analyze images and videos via ModelScope vision models |
 

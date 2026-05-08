@@ -351,3 +351,26 @@ class TestValidateSkillPackageSkillMdMissing:
             mock_find.return_value = tmp_path / "myskill"
             result = validate_skill_package(str(zip_path))
             assert result is None
+
+
+class TestSkillAgentContextYolo:
+    """Tests for SkillAgentContext.yolo field"""
+
+    def test_default_yolo_false(self):
+        from chcode.utils.skill_loader import SkillAgentContext
+        ctx = SkillAgentContext(
+            skill_loader=MagicMock(),
+            model_config={},
+            working_directory=Path("/tmp"),
+        )
+        assert ctx.yolo is False
+
+    def test_yolo_true(self):
+        from chcode.utils.skill_loader import SkillAgentContext
+        ctx = SkillAgentContext(
+            skill_loader=MagicMock(),
+            model_config={},
+            working_directory=Path("/tmp"),
+            yolo=True,
+        )
+        assert ctx.yolo is True

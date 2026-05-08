@@ -735,3 +735,31 @@ class TestProgressUpdaterCancellation:
                 except asyncio.CancelledError:
                     pass
             display._finalize_progress()
+
+
+class TestForceResetDisplay:
+    """Tests for force_reset_display()"""
+
+    def test_resets_parallel_and_count(self, monkeypatch):
+        monkeypatch.setattr(display, "_subagent_parallel", True)
+        monkeypatch.setattr(display, "_subagent_count", 3)
+        display.force_reset_display()
+        assert display._subagent_parallel is False
+        assert display._subagent_count == 0
+
+    def test_resets_console_quiet(self):
+        display.console.quiet = True
+        display.force_reset_display()
+        assert display.console.quiet is False
+
+    def test_stops_progress(self):
+        display._start_progress()
+        assert display._progress_live is not None
+        display.force_reset_display()
+        assert display._progress_live is None
+
+    def test_idempotent(self):
+        display.force_reset_display()
+        display.force_reset_display()
+        assert display._subagent_count == 0
+        assert display._subagent_parallel is False

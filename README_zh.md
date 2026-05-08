@@ -18,7 +18,7 @@
 <img src="https://raw.githubusercontent.com/ScarletMercy/chcode/main/assets/chagent.png" alt="chagent prototype" width="600"/>
 </details>
 
-> 6000+ 行 Python 代码，14 个内置工具，完整会话持久化，Git 感知工作流。
+> 7000+ 行 Python 代码，14 个内置工具，完整会话持久化，Git 感知工作流。
 
 ![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -65,9 +65,10 @@
 
 ### 人工审核
 
-- **Common 模式** — 每次工具调用需要确认，编辑操作显示 diff 预览
-- **YOLO 模式** — 自动批准所有操作
+- **Common 模式** — 每次工具调用需要确认，编辑操作显示 diff 预览。仅可使用 Explore 和 Plan 子代理
+- **YOLO 模式** — 自动批准所有操作。所有子代理可用，包括 General-purpose
 - 通过 `Tab` 键或 `/mode` 命令切换
+- 切换模式时自动更新可用子代理列表
 
 ### 工作环境隔离
 
@@ -95,9 +96,11 @@
 
 ### 子代理系统
 
-- 三种内置代理类型：**Explore**（代码库搜索，只读）、**Plan**（架构设计）、**General**（全能力编程）
-- **并行执行** — 同时启动多个代理处理独立任务
+- 三种内置代理类型：**Explore**（代码库搜索，只读）、**Plan**（架构设计，只读）、**General-purpose**（全能力编程）
+- **模式感知可用性** — 普通模式：仅 Explore + Plan；YOLO 模式：全部三种 + 自定义代理
+- **并行执行** — 同时启动多个代理处理独立任务，带实时旋转进度显示
 - 子代理运行在**隔离上下文**中，保护主对话不被上下文污染
+- 只读代理（Explore、Plan）具有 **bash 命令限制**，防止误修改
 - **自定义代理** — 在 `.chat/agents/` 中定义自己的代理类型，配备专属工具和指令
 
 ### 技能系统
@@ -126,7 +129,7 @@
 | `web_fetch` | 抓取 URL 内容并转换为 Markdown |
 | `web_search` | 通过 [Tavily](https://tavily.com) 进行网络搜索 |
 | `ask_user` | 单选、多选、批量问题与用户交互 |
-| `agent` | 启动子代理（explore、plan、general、custom），支持并行执行 |
+| `agent` | 启动子代理（Explore、Plan、YOLO 模式下含 General-purpose、custom），支持并行执行 |
 | `todo_write` | 结构化任务追踪，适用于复杂多步骤工作 |
 | `vision` | 通过视觉模型分析图片和视频 |
 
