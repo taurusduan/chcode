@@ -163,7 +163,7 @@ class TestRenderToolCall:
 
     def test_render_tool_call_subagent_multi(self, monkeypatch):
         """Suppressed with multiple subagents"""
-        monkeypatch.setattr(display, "_subagent_parallel", False)
+        monkeypatch.setattr(display, "_subagent_parallel", True)
         monkeypatch.setattr(display, "_subagent_count", 2)
 
         mock_console = MagicMock()

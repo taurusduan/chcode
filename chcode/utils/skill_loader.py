@@ -540,4 +540,5 @@ class SkillAgentContext:
     model_config: dict
     working_directory: Path
     thread_id: str = ""
+    yolo: bool = False
     extra: dict = field(default_factory=dict)

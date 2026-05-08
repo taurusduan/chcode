@@ -1374,6 +1374,7 @@ class ChatREPL:
                 working_directory=self.workplace_path,
                 model_config=self.model_config or INNER_MODEL_CONFIG,
                 thread_id=self.session_mgr.thread_id,
+                yolo=self.yolo,
             )
 
             while True:
@@ -1420,6 +1421,7 @@ class ChatREPL:
 
                 except asyncio.CancelledError:
                     await self._handle_cancel(user_input)
+                    _display.force_reset_display()
                     console.print(Text("\n[已中断]", style="dim"), "\n")
                     break
                 except ModelSwitchError:
@@ -1447,6 +1449,7 @@ class ChatREPL:
                                 working_directory=self.workplace_path,
                                 model_config=self.model_config or INNER_MODEL_CONFIG,
                                 thread_id=self.session_mgr.thread_id,
+                                yolo=self.yolo,
                             )
                             # 如果当前 input_data 是已消费的 Command(resume=...)，
                             # 重置为原始输入，避免复用已消费的 Command

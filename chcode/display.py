@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.rule import Rule
 from rich.live import Live
+from rich._spinners import SPINNERS
 
 import asyncio
 import contextvars
@@ -29,6 +30,9 @@ _agent_progress: dict[str, dict] = {}
 _agent_progress_lock = threading.Lock()
 _progress_live: Live | None = None
 _progress_task: asyncio.Task | None = None
+
+_DOTS = SPINNERS["dots"]["frames"]
+_DOTS_MS = SPINNERS["dots"]["interval"]
 
 if TYPE_CHECKING:
     pass
@@ -74,11 +78,11 @@ def render_ai_chunk(content: str) -> None:
 def render_ai_start():
     """AI 回复开始"""
     global _subagent_parallel
-    # 先完成并清理之前的进度显示
-    _finalize_progress()
+    if _subagent_count == 0:
+        _finalize_progress()
+        with _agent_progress_lock:
+            _agent_progress.clear()
     _subagent_parallel = False
-    with _agent_progress_lock:
-        _agent_progress.clear()
     if _subagent_count > 0:
         return
     console.print()
@@ -107,7 +111,8 @@ def render_reasoning(reasoning: str) -> None:
 def _start_progress():
     global _progress_live
     if _progress_live is None:
-        _progress_live = Live("", transient=True, console=console, refresh_per_second=1)
+        _live_console = Console(file=console.file)
+        _progress_live = Live("", transient=False, console=_live_console, refresh_per_second=12)
         _progress_live.start()
 
 
@@ -118,54 +123,78 @@ def _update_progress():
         if not _agent_progress:
             _progress_live.update("")
             return
-        now = time.time()
+        frame = _DOTS[int(time.time() * 1000 / _DOTS_MS) % len(_DOTS)]
         lines = []
         for tag, info in _agent_progress.items():
-            elapsed = int(now - info["start"])
-            timeout = info.get("timeout", 300)
-
+            calls = info.get("calls", 0)
+            calls_str = f" ({calls} calls)" if calls else ""
             if info.get("failed"):
-                lines.append(f"  [red]\u274c {tag}: \u8d85\u65f6 ({timeout}s)[/red]")
+                lines.append(f"  [red]✗ {tag}[/red]{calls_str}")
             elif info.get("done"):
-                lines.append(f"  [green]\u2705 {tag}: done ({elapsed}s)[/green]")
+                lines.append(f"  [green]✓ {tag}[/green]{calls_str}")
             else:
-                remaining = max(0, timeout - elapsed)
-                pct = min(elapsed / timeout, 1.0) if timeout > 0 else 1.0
-                bar_len = int(pct * 16)
-                bar = "\u2588" * bar_len + "\u2591" * (16 - bar_len)
-                lines.append(f"  {tag}: {remaining}s \u5269\u4f59 [{bar}]")
+                lines.append(f"  [cyan]{frame}[/cyan] {tag}{calls_str}")
     _progress_live.update("\n".join(lines))
 
 
 async def _progress_updater():
-    """定期更新进度显示的后台任务"""
     try:
         while True:
-            await asyncio.sleep(1)
+            await asyncio.sleep(_DOTS_MS / 1000)
             if _progress_live is None:
                 break
             _update_progress()
     except asyncio.CancelledError:
-        pass  # 优雅处理取消
+        pass
+
+
+async def _result_spinner_updater():
+    try:
+        while True:
+            await asyncio.sleep(_DOTS_MS / 1000)
+            if _progress_live is None:
+                break
+            frame = _DOTS[int(time.time() * 1000 / _DOTS_MS) % len(_DOTS)]
+            _progress_live.update(f"  [cyan]{frame}[/cyan] 正在整理结果...")
+    except asyncio.CancelledError:
+        pass
+
+
+def _start_result_spinner():
+    """单 agent 完成后，显示整理结果的加载圈"""
+    global _progress_live, _progress_task
+    if _progress_live is None:
+        _live_console = Console(file=console.file)
+        _progress_live = Live("", transient=False, console=_live_console, refresh_per_second=12)
+        _progress_live.start()
+    if _progress_task is None or _progress_task.done():
+        _progress_task = asyncio.ensure_future(_result_spinner_updater())
 
 
 def _finalize_progress():
-    """停止进度显示，打印最终状态并清理资源"""
+    """停止进度显示并清理资源"""
     global _progress_live, _progress_task
 
-    # 先取消更新任务
     if _progress_task is not None and not _progress_task.done():
         _progress_task.cancel()
         _progress_task = None
 
-    # 停止 Live（transient=True 会自动清除显示内容）
     if _progress_live is not None:
+        _update_progress()
         _progress_live.stop()
         _progress_live = None
 
-    # 清空进度数据
     with _agent_progress_lock:
         _agent_progress.clear()
+
+
+def force_reset_display() -> None:
+    """异常退出时强制重置所有显示状态"""
+    global _subagent_count, _subagent_parallel
+    _subagent_count = 0
+    _subagent_parallel = False
+    console.quiet = False
+    _finalize_progress()
 
 
 def render_tool_call(name: str, summary: str) -> None:
@@ -174,13 +203,11 @@ def render_tool_call(name: str, summary: str) -> None:
         with _agent_progress_lock:
             if tag in _agent_progress:
                 _agent_progress[tag]["calls"] += 1
+        return
+    if _subagent_parallel:
+        return
     if len(summary) > 120:
         summary = summary[:117] + "..."
-    if name == "agent":
-        console.print(Text(f"\n[{name}] {summary}", style="bold cyan"))
-        return
-    if _subagent_parallel or _subagent_count >= 2:
-        return
     if _subagent_count == 1:
         console.print(Text(f"  [{name}] {summary}", style="dim cyan"))
         return

@@ -119,6 +119,18 @@ def _ipc_send(event: dict) -> None:
 
 
 @wrap_tool_call
+async def restrict_agent_type(
+    request: ToolCallRequest, handler: Callable[[ToolCallRequest], Command]
+) -> Command | ToolMessage:
+    if request.tool_call.get("name") == "agent":
+        args = request.tool_call.get("args", {})
+        if args.get("subagent_type") == "general-purpose":
+            if _hitl_middleware is not None and _hitl_middleware.interrupt_on:
+                args["subagent_type"] = "Explore"
+    return await handler(request)
+
+
+@wrap_tool_call
 async def emit_tool_events(
     request: ToolCallRequest, handler: Callable[[ToolCallRequest], Command]
 ) -> Command | ToolMessage:
@@ -186,6 +198,22 @@ async def emit_thinking_events(
     except Exception:
         _ipc_send({"type": "thinking_end", "ts": time.time()})
         raise
+
+
+@wrap_model_call
+async def detect_parallel_agents(
+    request: ModelRequest, handler: Callable[[ModelRequest], ModelResponse]
+) -> ModelResponse:
+    result = await handler(request)
+    if not result.result:
+        return result
+    ai_msg = result.result[0]
+    if hasattr(ai_msg, "tool_calls") and ai_msg.tool_calls:
+        from chcode import display as _d
+        agent_count = sum(1 for tc in ai_msg.tool_calls if tc.get("name") == "agent")
+        if agent_count >= 2:
+            _d._subagent_parallel = True
+    return result
 
 
 @wrap_tool_call
@@ -299,6 +327,13 @@ Tools:
  Guidelines:
 - Never create .md/README files unless explicitly asked.
 - When the user sends an image or video file path, use vision to understand it before responding."""
+
+    # 动态注入可用子 agent 列表
+    yolo = request.runtime.context.yolo
+    agents_section = "\n\nSub-agents:\n- Explore: codebase exploration and search\n- Plan: design implementation plans"
+    if yolo:
+        agents_section += "\n- general-purpose: full-capability tasks including reading, writing, and executing code"
+    base_prompt += agents_section
 
     return await asyncio.to_thread(skill_loader.build_system_prompt, base_prompt)
 
@@ -423,10 +458,12 @@ def build_agent(
         model,
         _get_all_tools() + (mcp_tools or []),
         middleware=[
+            restrict_agent_type,
             emit_tool_events,
             handle_tool_errors,
             filter_vision_tool,
             emit_thinking_events,
+            detect_parallel_agents,
             tool_result_budget,
             load_skills,
             load_model,
@@ -459,6 +496,8 @@ def update_hitl_config(yolo: bool) -> None:
     """运行时更新 HITL interrupt_on 配置，无需重建 agent"""
     if _hitl_middleware is not None:
         _hitl_middleware.interrupt_on = _build_interrupt_on(yolo)
+    from chcode.utils.tools import update_agent_tool_desc
+    update_agent_tool_desc(yolo)
 
 
 def update_summarization_model(model_config: dict) -> None:

@@ -1133,10 +1133,42 @@ async def _ask_multi_questions(questions: list[dict]) -> str:
     return "\n\n".join(result_lines)
 
 
+_AGENT_DESC_NORMAL = """Launch a sub-agent to perform a task autonomously.
+
+Available sub-agent types:
+- "Explore": For codebase exploration, searching code, finding files.
+- "Plan": For designing implementation plans and architectural analysis.
+
+Args:
+    prompt: The task description for the sub-agent.
+    subagent_type: Type of sub-agent to launch ("Explore", "Plan", or a custom agent name).
+    description: Short description of what this sub-agent invocation does (for display purposes).
+    timeout_seconds: Maximum seconds the sub-agent can run before being terminated. Default 300 (5 minutes). Must be greater than 300 (5 minutes) to allow sufficient execution time.
+"""
+
+_AGENT_DESC_YOLO = """Launch a sub-agent to perform a task autonomously.
+
+Available sub-agent types:
+- "Explore": For codebase exploration, searching code, finding files.
+- "Plan": For designing implementation plans and architectural analysis.
+- "general-purpose": For full-capability tasks including reading, writing, and executing code.
+
+Args:
+    prompt: The task description for the sub-agent.
+    subagent_type: Type of sub-agent to launch ("Explore", "Plan", "general-purpose", or a custom agent name).
+    description: Short description of what this sub-agent invocation does (for display purposes).
+    timeout_seconds: Maximum seconds the sub-agent can run before being terminated. Default 300 (5 minutes). Must be greater than 300 (5 minutes) to allow sufficient execution time.
+"""
+
+
+def update_agent_tool_desc(yolo: bool) -> None:
+    agent.__doc__ = _AGENT_DESC_YOLO if yolo else _AGENT_DESC_NORMAL
+
+
 @tool
 async def agent(
     prompt: str,
-    subagent_type: str = "general-purpose",
+    subagent_type: str = "Explore",
     description: str = "",
     timeout_seconds: int = 300,
     runtime: ToolRuntime[SkillAgentContext] = None,
@@ -1144,20 +1176,13 @@ async def agent(
     """
     Launch a sub-agent to perform a task autonomously.
 
-    Sub-agents have their own tool set and system prompt. They run independently
-    and return a text report when finished. Use this for complex, multi-step tasks
-    that benefit from focused execution.
-
     Available sub-agent types:
-    - "general-purpose": Full tool access, can read/write files and run commands. Use for multi-step coding tasks, complex research, or when you need autonomous execution.
-    - "Explore": Read-only agent specialized in codebase exploration. Use for finding files by pattern, searching code, answering questions about the codebase. Fast and efficient.
-    - "Plan": Read-only agent for designing implementation plans. Use for architectural analysis, step-by-step implementation strategies, identifying critical files.
-
-    Custom agents can also be loaded from .chat/agents/*.md files.
+    - "Explore": For codebase exploration, searching code, finding files.
+    - "Plan": For designing implementation plans and architectural analysis.
 
     Args:
-        prompt: The task description for the sub-agent. Be specific about what to find, analyze, or do.
-        subagent_type: Type of sub-agent to launch ("general-purpose", "Explore", "Plan", or a custom agent name).
+        prompt: The task description for the sub-agent.
+        subagent_type: Type of sub-agent to launch ("Explore", "Plan", or a custom agent name).
         description: Short description of what this sub-agent invocation does (for display purposes).
         timeout_seconds: Maximum seconds the sub-agent can run before being terminated. Default 300 (5 minutes). Must be greater than 300 (5 minutes) to allow sufficient execution time.
     """
@@ -1166,7 +1191,6 @@ async def agent(
     from chcode.agents.runner import run_subagent
 
     tag = f"{subagent_type}: {(description or '')[:30]}"
-    render_tool_call("agent", f"{subagent_type}: {description or prompt[:60]}")
 
     all_agents = load_agents()
     agent_def = all_agents.get(subagent_type)
@@ -1179,24 +1203,30 @@ async def agent(
     working_directory = runtime.context.working_directory
     skill_loader = runtime.context.skill_loader
 
-    _display._current_agent_tag.set(tag)
-    with _display._agent_progress_lock:
-        _display._agent_progress[tag] = {
-            "calls": 0,
-            "start": time.time(),
-            "timeout": timeout_seconds,
-            "failed": False,
-        }
-
     with _display._subagent_count_lock:
         _display._subagent_count += 1
         if _display._subagent_count >= 2:
             _display._subagent_parallel = True
+            _display.console.quiet = True
             _display._start_progress()
             if _display._progress_task is None or _display._progress_task.done():
                 _display._progress_task = asyncio.ensure_future(
                     _display._progress_updater()
                 )
+
+    _display._current_agent_tag.set(tag)
+    with _display._agent_progress_lock:
+        _display._agent_progress[tag] = {
+            "failed": False,
+            "calls": 0,
+        }
+
+    # 让所有并行 agent 先完成同步初始化，再判断是否打印 [agent] 行
+    await asyncio.sleep(0)
+    if not _display._subagent_parallel and _display._subagent_count == 1:
+        _display.console.print(
+            Text(f"\n[agent] {subagent_type}: {description or prompt[:60]}", style="bold cyan")
+        )
 
     try:
         result, is_error = await run_subagent(
@@ -1207,6 +1237,7 @@ async def agent(
             skill_loader=skill_loader,
             timeout_seconds=timeout_seconds,
             description=description,
+            yolo=runtime.context.yolo,
         )
 
         with _display._agent_progress_lock:
@@ -1215,19 +1246,20 @@ async def agent(
                     _display._agent_progress[tag]["failed"] = True
                 else:
                     _display._agent_progress[tag]["done"] = True
-        # 触发一次立即更新
         _display._update_progress()
 
-        if not _display._subagent_parallel and result:
-            for line in result.splitlines():
-                _display.console.print(Text(f"  {line}", style="dim"))
     finally:
         _display._current_agent_tag.set(None)
         with _display._subagent_count_lock:
             _display._subagent_count -= 1
             if _display._subagent_count == 0:
+                was_parallel = _display._subagent_parallel
                 _display._subagent_parallel = False
-                _display._finalize_progress()
+                _display.console.quiet = False
+                if was_parallel:
+                    _display._finalize_progress()
+                else:
+                    _display._start_result_spinner()
 
     return result
 

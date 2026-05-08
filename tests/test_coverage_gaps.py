@@ -2244,10 +2244,10 @@ class TestAgentRunnerModelOverride:
 
 
 class TestAgentRunnerHitlMiddleware:
-    """Cover lines 122-126: HITL middleware for non-read-only agents."""
+    """Subagents no longer receive HITL middleware."""
 
-    async def test_hitl_middleware_added_when_available(self):
-        """Cover lines 122-126: HITL middleware added for non-read-only."""
+    async def test_hitl_middleware_not_added_to_subagent(self):
+        """HITL middleware is not included in subagent middleware list."""
         from chcode.agents.runner import run_subagent
         from unittest.mock import AsyncMock, patch, MagicMock
         from pathlib import Path
@@ -2256,7 +2256,7 @@ class TestAgentRunnerHitlMiddleware:
         agent_def.agent_type = "test"
         agent_def.model = None
         agent_def.system_prompt = "test"
-        agent_def.read_only = False  # Not read-only
+        agent_def.read_only = False
         agent_def.tools = None
         agent_def.disallowed_tools = []
 
@@ -2278,10 +2278,9 @@ class TestAgentRunnerHitlMiddleware:
                             MagicMock(),
                             timeout_seconds=300,
                         )
-                        # Verify create_agent was called with HITL middleware
                         call_args = mock_create.call_args
                         middleware_list = call_args[1]["middleware"]
-                        assert mock_hitl in middleware_list
+                        assert mock_hitl not in middleware_list
 
 
 # ────────────────────────────────────────────────────────────────
